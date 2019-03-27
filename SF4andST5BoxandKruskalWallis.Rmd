@@ -1,0 +1,508 @@
+---
+title: "Statistical assessment of the dissimilarities"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+The purpose of the following code is to perform a statistical assessment of the pairwise dissimilarities. The purpose is to supplement the 'adonis' analysis that revealed some groups had a significant difference in group homogeneities.  
+
+Parametric methods are not appropriate therefore a nonparametric test were implemented. 
+
+### Packages
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+help(package="dplyr")
+library(stringr) #Simple, consistent wrappers for common string operations. Like the str_replace function. help(package="stringr")
+library(reshape2) # Flexibly restructure and aggregate data using just two functions: melt and 'dcast' (or 'acast'). help(package="reshape2")
+library(car) # Companion to applied regression includes Levene's test. help(package="car")
+library(FSA) #A variety of simple fish stock assessment methods. Includes the Dunne non-parametric follow-up test help(package="FSA")
+```
+
+
+## Define variables
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<-"Allspiked" #All, Allspiked, Allunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Vegdist dissimilarity method
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+
+#Decostand standardization method
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log
+
+#If the ANOVA is significant which post test to use
+PostTestParametric<-"ttest" #ttest, TukeyHSD
+
+#If PostTestParametric<-"ttest", which p-value correction to use
+padj<-"bonferroni" #holm, hochberg, hommel, bonferroni, BH, BY, fdr, none
+
+#If the Kruskal is significant which post test to use
+PostTestNonParametric<-"Dunne" #Dunne, MannWhitney
+
+#If PostTestNonParametric<-"Dunne", which p-value correction to use
+Dunnepadj<-"bonferroni" #holm, hochberg, hommel, bonferroni, BH, BY, fdr, none 
+
+#If PostTestNonParametric<-"MannWhitney", which p-value correction to use
+MWpadj<-"bonferroni" #holm, hochberg, hommel, bonferroni, BH, BY, fdr, none
+```
+
+## Analysis
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 2 Subsetting
+```{r}
+#Removing negative and positive controls
+Metadata<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting metadata
+if (Subset=="Allspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Unspiked")
+} else if (Subset=="P1") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubExp=="HX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata2<-filter(Metadata, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata2$Matching_samples)
+  Metadata<-filter(Metadata, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata2)
+} else if (SubExp=="HXFTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+##Wanted to test if we for instance removed the 22C samples
+#RemoveConditions<-c("64h22C", "16h22C")
+#Metadata<-Metadata[!Metadata$Replicate_Boxplot %in% RemoveConditions, ]
+
+
+#Applying subsetting to OTU tables 
+Tax<-select(Tax, one_of(Metadata$Sample))
+```
+
+### 3 Long formatted Bray Curtis dissimilarities
+```{r}
+#Multi dimensional scaling 
+distmatrix <- vegdist(decostand(t(Tax), method=Stand), method=Dist)
+
+#Make distances into matrix
+distmatrix<-as.matrix(distmatrix)
+
+#Contains all values except the ones equal to 0
+meltPwBC<-subset(melt(distmatrix), value!=0)
+rm(distmatrix)
+
+#Have comparisons of both 1vs2 and 2vs1 ..., but are removed during the following filtration
+```
+
+### 4 Boxplot of dissimilarities
+```{r, echo=FALSE}
+###############To make: 2 All between between sample groups#################
+##Only contain samples with "P1" in column 1 named Var1
+P1vsOther<-filter(meltPwBC, grepl('P1', Var1))
+##From this exclude comparisons with samples containing "P1"
+P1vsOther<-filter(P1vsOther, !grepl('P1', Var2))
+##Histogram to look at distribution
+hist(P1vsOther$value)
+###Low values are the other fecal samples the high values are the sewage samples
+
+##Only contain samples with "P2" in column 1 named Var1
+P2vsS1and2<-filter(meltPwBC, grepl('P2', Var1))
+##From this exclude comparisons with samples containing "P2" and "P1" because that comparison already is made
+P2vsS1and2<-filter(P2vsS1and2, !grepl('P1|P2', Var2))
+
+##Only contain samples with "S1" in column 1 named Var1
+S1vsS2<-filter(meltPwBC, grepl('S1', Var1))
+##and "S2" in column 2
+S1vsS2<-filter(S1vsS2, grepl('S2', Var2))
+
+#Combine all pairwise comparisons
+Allbetweensamplegroups<-bind_rows(P1vsOther, P2vsS1and2, S1vsS2)
+
+#Create boxplot 2
+boxplot(Allbetweensamplegroups$value)
+
+#Structure dataframe for full boxplot 
+box2<-mutate(Allbetweensamplegroups, name="Allbetween")
+
+
+###############To make: 3 Feces 1 vs. Feces 2##############
+##Only contain samples with "P1" in column 1 named Var1
+P1vsP2<-filter(meltPwBC, grepl('P1', Var1))
+##and "P2" in column 2 
+P1vsP2<-filter(P1vsP2, grepl('P2', Var2))
+##Histogram to look at distribution
+hist(P1vsP2$value)
+###
+##Create boxplot
+boxplot(P1vsP2$value)
+
+#Structure dataframe for full boxplot 
+box3<-mutate(P1vsP2, name="P1vsP2")
+
+
+
+###############To make: 4 Feces 1 vs. Sewage 1##############
+##Only contain samples with "P1" in column 1 named Var1
+P1vsS1<-filter(meltPwBC, grepl('P1', Var1))
+##and "S1" in column 2 
+P1vsS1<-filter(P1vsS1, grepl('S1', Var2))
+##Histogram to look at distribution
+hist(P1vsS1$value)
+###
+##Create boxplot
+boxplot(P1vsS1$value)
+
+#Structure dataframe for full boxplot 
+box4<-mutate(P1vsS1, name="P1vsS1")
+
+###############To make: 5 Feces 1 vs. Sewage 2##############
+##Only contain samples with "P1" in column 1 named Var1
+P1vsS2<-filter(meltPwBC, grepl('P1', Var1))
+##and "S2" in column 2 
+P1vsS2<-filter(P1vsS2, grepl('S2', Var2))
+##Histogram to look at distribution
+hist(P1vsS2$value)
+###
+##Create boxplot
+boxplot(P1vsS2$value)
+
+#Structure dataframe for full boxplot 
+box5<-mutate(P1vsS2, name="P1vsS2")
+
+###############To make: 6 Feces 2 vs. Sewage 1##############
+##Only contain samples with "P2" in column 1 named Var1
+P2vsS1<-filter(meltPwBC, grepl('P2', Var1))
+##and "S1" in column 2 
+P2vsS1<-filter(P2vsS1, grepl('S1', Var2))
+##Histogram to look at distribution
+hist(P2vsS1$value)
+###
+##Create boxplot
+boxplot(P2vsS1$value)
+
+#Structure dataframe for full boxplot 
+box6<-mutate(P2vsS1, name="P2vsS1")
+
+###############To make: 7 Feces 2 vs. Sewage 2##############
+##Only contain samples with "P2" in column 1 named Var1
+P2vsS2<-filter(meltPwBC, grepl('P2', Var1))
+##and "S2" in column 2 
+P2vsS2<-filter(P2vsS2, grepl('S2', Var2))
+##Histogram to look at distribution
+hist(P2vsS2$value)
+###
+##Create boxplot
+boxplot(P2vsS2$value)
+
+#Structure dataframe for full boxplot 
+box7<-mutate(P2vsS2, name="P2vsS2")
+
+###############To make: 8 Sewage 1 vs. Sewage 2##############
+##Only contain samples with "S1" in column 1 named Var1
+S1vsS2<-filter(meltPwBC, grepl('S1', Var1))
+##and "S2" in column 2 
+S1vsS2<-filter(S1vsS2, grepl('S2', Var2))
+##Histogram to look at distribution
+hist(S1vsS2$value)
+###
+##Create boxplot
+boxplot(S1vsS2$value)
+
+#Structure dataframe for full boxplot 
+box8<-mutate(S1vsS2, name="S1vsS2")
+
+###############To make: 1 All within sample groups (Also 9-12)##############
+##Only contain samples with "P1" in column 1 named Var1
+P1vsP1<-filter(meltPwBC, grepl('P1', Var1))
+##and "P1" in column 2 
+P1vsP1<-filter(P1vsP1, grepl('P1', Var2))
+##Histogram to look at distribution
+hist(P1vsP1$value)
+###
+##Create boxplot 9 P1 vs P1
+boxplot(P1vsP1$value)
+
+#Structure dataframe for full boxplot 
+box9<-mutate(P1vsP1, name="P1vsP1")
+
+##Only contain samples with "P2" in column 1 named Var1
+P2vsP2<-filter(meltPwBC, grepl('P2', Var1))
+##and "P2" in column 2 
+P2vsP2<-filter(P2vsP2, grepl('P2', Var2))
+##Histogram to look at distribution
+hist(P2vsP2$value)
+###
+##Create boxplot 10 P2 vs P2
+boxplot(P2vsP2$value)
+
+#Structure dataframe for full boxplot 
+box10<-mutate(P2vsP2, name="P2vsP2")
+
+##Only contain samples with "S1" in column 1 named Var1
+S1vsS1<-filter(meltPwBC, grepl('S1', Var1))
+##and "S1" in column 2 
+S1vsS1<-filter(S1vsS1, grepl('S1', Var2))
+##Histogram to look at distribution
+hist(S1vsS1$value)
+###
+##Create boxplot 11 S1 vs S1
+boxplot(S1vsS1$value)
+
+#Structure dataframe for full boxplot 
+box11<-mutate(S1vsS1, name="S1vsS1")
+
+##Only contain samples with "S2" in column 1 named Var1
+S2vsS2<-filter(meltPwBC, grepl('S2', Var1))
+##and "S2" in column 2 
+S2vsS2<-filter(S2vsS2, grepl('S2', Var2))
+##Histogram to look at distribution
+hist(S2vsS2$value)
+###
+##Create boxplot 12 S2 vs S2
+boxplot(S2vsS2$value)
+
+#Structure dataframe for full boxplot 
+box12<-mutate(S2vsS2, name="S2vsS2")
+
+
+#Combine all pairwise comparisons of the sample samples
+Allwithinsamplegroups<-bind_rows(P1vsP1, P2vsP2, S1vsS1, S2vsS2)
+
+#Create boxplot 2
+boxplot(Allwithinsamplegroups$value)
+
+#Structure dataframe for full boxplot 
+box1<-mutate(Allwithinsamplegroups, name="Allwithin")
+```
+
+### 5 Boxplot containing all
+```{r}
+boxplotting<-bind_rows(box1, box2, box3, box4, box5, box6, box7, box8, box9, box10, box11, box12)
+
+#Defining the order, can change if needed
+boxplotting$name2<-factor(boxplotting$name, levels= c("Allbetween", "Allwithin", "P1vsP1", "P2vsP2", "S1vsS1", "S2vsS2", "P1vsP2", "S1vsS2", "P1vsS1", "P1vsS2", "P2vsS1", "P2vsS2"))
+
+#png(paste("BoxplotBCstat", "Genus", ".png", sep=""))
+ggplot(boxplotting, aes(x=name2, y=value))+geom_boxplot()+ggtitle(paste("Boxplot", "Genus", sep=" ")) + labs(x="Compared groups", y="Bray-Curtis dissimilarities \n calculated on Hellinger transformed data")
+#dev.off()
+```
+
+### 6 Adding Replicates to boxplot figure
+```{r}
+#Makes column based on Var1 that only contain middle part of sample name
+boxplotting2 <- mutate(boxplotting, from = str_replace(Var1,"[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_","") %>% str_replace("_[a-z]$",""))
+#Makes column based on Var2 that only contain middle part of sample name
+boxplotting2 <- mutate(boxplotting2, to = str_replace(Var2,"[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_","") %>% str_replace("_[a-z]$",""))
+#Makes a column were TRUE means from is the same as to otherwise FALSE
+boxplotting2 <- mutate(boxplotting2, rep = (from == to))
+
+##Only contain samples that are replicates containing TRUE in rep
+Replicates<-filter(boxplotting2, grepl('TRUE', rep))
+#Now both represented in all within and P1vsP1...
+Replicates<-filter(Replicates, grepl('Allwithin', name))
+#Now only represented once
+boxplot(Replicates$value)
+
+#Boxplot with all
+#Structure dataframe for full boxplot 
+Replicates<-mutate(Replicates, name="Replicates")
+Replicates<-mutate(Replicates, name2="Replicates")
+
+boxplotting2<-bind_rows(Replicates, boxplotting2)
+
+#Defining the order, can change if needed
+boxplotting2$name2<-factor(boxplotting2$name, levels= c("Replicates", "Allbetween", "Allwithin", "P1vsP1", "P2vsP2", "P1vsP2", "S1vsS1", "S2vsS2", "S1vsS2", "P1vsS1", "P1vsS2", "P2vsS1", "P2vsS2"))
+
+pdf(paste("BoxplotBCstat", "Genus", SubExp, Subset, "2.pdf", sep=""), height=6, width=12)
+ggplot(boxplotting2, aes(x=name2, y=value)) + geom_boxplot() + labs(x="Compared sample groups", y="Bray-Curtis dissimilarities \n calculated on Hellinger transformed data") + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size=12, angle = 45, hjust = 1), axis.title=element_text(size=14)) 
+dev.off()
+
+#Trying to make fancy boxplots + geom_jitter(), might want to  
+#pdf(paste("BoxplotBCstatFancy", "Genus", "2.pdf", sep=""), height=6, width=12)
+ggplot(boxplotting2, aes(x=name2, y=value)) + geom_boxplot() + labs(x="Compared sample groups", y="Bray-Curtis dissimilarities \n calculated on Hellinger transformed data") + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size=12, angle = 45, hjust = 1), axis.title=element_text(size=14)) + geom_jitter() 
+#,dev.off()
+```
+
+
+### 7 Statistical testing of differences between groups (parametric)
+Make statistical test ANOVA and follow-up tests (t-tests)   
+See below for non-parametric Kruskal-wallis and Mann-Whitney.
+```{r}
+#Model fitting
+distmodel1<-lm(value~name, data=boxplotting)
+summary(distmodel1)
+
+distmodel1object<-anova(distmodel1)
+
+if (distmodel1object[1,5]>0.05) {
+  print("Anova not significant")
+} else if (PostTestParametric=="ttest") {
+  pairwise.t.test(boxplotting$value, boxplotting$name, p.adj=padj)
+} else if (PostTestParametric=="TukeyHSD") {
+  TukeyHSD(aov(value~name, data=boxplotting), "name")
+} else {
+  print("No valid post test specified")
+}
+
+#Using the TukeyHSD also incorporates correction
+```
+
+### 8 Levene's test
+Levene's test, assessing if an ANOVA is appropriate. Can log transform data otherwise a non-parametric test such as Kruskal-Wallis followed by a Mann-Whitney test.    
+Levene's test explained: If p-value is less than 0.05 the obtained differences in sample variances are unlikely to have occurred based on random sampling from a population with equal variances
+```{r}
+leveneTest(value~name, data=boxplotting)
+leveneTest(value~name, data=boxplotting, center=mean)
+
+#Removing Allbetween and Allwithin
+Levene1<-filter(boxplotting, !grepl('Allbetween|Allwithin', name))
+leveneTest(value~name, data=Levene1)
+leveneTest(value~name, data=Levene1, center=mean)
+
+#Removing all within comparisons
+Levene2<-filter(boxplotting, grepl('P1vsP2|S1vsS2|P1vsS1|P1vsS2|P2vsS1|P2vsS2', name))
+leveneTest(value~name, data=Levene2)
+leveneTest(value~name, data=Levene2, center=mean)
+
+
+#Levenes test on log transformed values
+boxplotting$logvalue<-log(boxplotting$value)
+
+leveneTest(logvalue~name, data=boxplotting)
+leveneTest(logvalue~name, data=boxplotting, center=mean)
+
+#Removing Allbetween and Allwithin
+Levene1<-filter(boxplotting, !grepl('Allbetween|Allwithin', name))
+leveneTest(logvalue~name, data=Levene1)
+leveneTest(logvalue~name, data=Levene1, center=mean)
+
+#Removing all within comparisons
+Levene2<-filter(boxplotting, grepl('P1vsP2|S1vsS2|P1vsS1|P1vsS2|P2vsS1|P2vsS2', name))
+leveneTest(logvalue~name, data=Levene2)
+leveneTest(logvalue~name, data=Levene2, center=mean)
+```
+
+The Levene's test is significant it seem appropiate to make a non-parametric test to test if there is a difference between the groups.
+
+### 9 Statistical testing of differences between groups (non-parametric)
+Make statistical test Kruskal-wallis and follow-up tests (Mann-Whitney).
+```{r}
+kruskal<-kruskal.test(boxplotting$value~as.factor(boxplotting$name))
+kruskal #Just copy output
+#write.table(kruskal, file=paste("Kruskal", Subset, ".txt", sep=""), sep="\t", dec=".", row.names = T, quote = F)
+
+if (kruskal$p.value>0.05) {
+  print("Kruskal test not significant")
+} else if (PostTestNonParametric=="Dunne") {
+  dunnTest(boxplotting$value~as.factor(boxplotting$name), method=Dunnepadj)
+} else if (PostTestNonParametric=="MannWhitney") {
+  pairwise.wilcox.test(boxplotting$value, as.factor(boxplotting$name), p.adjust.method=MWpadj)
+} else {
+  print("No valid post test specified")
+}
+
+dunn<-dunnTest(boxplotting$value~as.factor(boxplotting$name), method=Dunnepadj)
+dunn$res
+write.table(dunn$res, file=paste("Pvalues", Subset, PostTestNonParametric, Dunnepadj, ".txt", sep=""), sep="\t", dec=".", row.names = T, quote = F)
+```
+
+## Comments
+Follow-up test pairwise Mann-Whitney, Dunne .... From rcompanion.org/rcompanion/d_06.html "If the Kruskal-Wallis test is significant, a post-hoc analysis can be performed to determine which levels of the independent variable differ from each other level.  Probably the most popular test for this is the Dunn test, which is performed with the dunnTest function in the FSA package.  Adjustments to the p-values could be made using the method option to control the familywise error rate or to control the false discovery rate.  See ?p.adjust for details.  
+Zar (2010) states that the Dunn test is appropriate for groups with unequal numbers of observations.  
+Dunnne seems like an appropriate follow-up test since there are unequal numbers of observations also make Mann-Whitney as option
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+

@@ -1,0 +1,454 @@
+
+---
+title: "Line plots for MC orgs"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+The purpose of the following code is to make line plots for the mock community organisms
+
+Data for the mock community organisms in the spiked and unspiked samples are created without modification  
+  
+
+### Packages 
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(knitr) #A General-Purpose Package for Dynamic Report Generation in R help(package="knitr")
+library(Rmisc) #The Rmisc library contains many functions useful for data analysis. Include summarySE help(package="Rmisc")
+library(reshape)
+```
+
+## Analysis unspiked
+### 1 Define variables
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- "Allunspiked"
+#All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked  
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+```
+
+### 2 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 3 Subsetting also in metadata file
+```{r}
+#Subsetting metadata
+if (Subset=="Allspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubExp=="HX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata2<-filter(Metadata, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata2$Matching_samples)
+  Metadata<-filter(Metadata, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata2)
+} else if (SubExp=="HXFTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax<-dplyr::select(Tax, one_of(Metadata$Sample))
+```
+
+### 4 Analysis setup
+**WOrkflow**   
+a) Changes scaled according to time 0h for each MC organisms. Creating a table consisting of the mean measure of each of the MC organisms at time 0h. Here the same dimension as the dataframe of MC organisms is created to divide the two dataframes.
+b) Remove Saccharomyces and Cryptosporidium since they are present at very low levels sometimes not even present.
+c) log values with base 2.
+d) Calculate mean and dispersion measures for each storage group
+e) Make seperate 0h measures for each temperature used for plotting to represent initial processing at 0h. 
+```{r}
+##Have to run it with All, HX and Both
+
+##Select organisms that were spiked with
+SelOrgs<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+tTaxSelect<-dplyr::select(as.data.frame(t(Tax)), one_of(c(SelOrgs)))
+
+##Divide with the mean at 0h
+#Create df for division
+divtable <- data.frame(Escherichia=c(rep(mean(tTaxSelect$Escherichia[1:3]), times=26), rep(mean(tTaxSelect$Escherichia[27:29]), times=(53-26)), rep(mean(tTaxSelect$Escherichia[54:56]), times=(80-53)), rep(mean(tTaxSelect$Escherichia[81:83]), times=(106-80))), Bacteroides=c(rep(mean(tTaxSelect$Bacteroides[1:3]), times=26), rep(mean(tTaxSelect$Bacteroides[27:29]), times=(53-26)), rep(mean(tTaxSelect$Bacteroides[54:56]), times=(80-53)), rep(mean(tTaxSelect$Bacteroides[81:83]), times=(106-80))), Salmonella=c(rep(mean(tTaxSelect$Salmonella[1:3]), times=26), rep(mean(tTaxSelect$Salmonella[27:29]), times=(53-26)), rep(mean(tTaxSelect$Salmonella[54:56]), times=(80-53)), rep(mean(tTaxSelect$Salmonella[81:83]), times=(106-80))), Fusobacterium=c(rep(mean(tTaxSelect$Fusobacterium[1:3]), times=26), rep(mean(tTaxSelect$Fusobacterium[27:29]), times=(53-26)), rep(mean(tTaxSelect$Fusobacterium[54:56]), times=(80-53)), rep(mean(tTaxSelect$Fusobacterium[81:83]), times=(106-80))), Propionibacterium=c(rep(mean(tTaxSelect$Propionibacterium[1:3]), times=26), rep(mean(tTaxSelect$Propionibacterium[27:29]), times=(53-26)), rep(mean(tTaxSelect$Propionibacterium[54:56]), times=(80-53)), rep(mean(tTaxSelect$Propionibacterium[81:83]), times=(106-80))), Staphylococcus=c(rep(mean(tTaxSelect$Staphylococcus[1:3]), times=26), rep(mean(tTaxSelect$Staphylococcus[27:29]), times=(53-26)), rep(mean(tTaxSelect$Staphylococcus[54:56]), times=(80-53)), rep(mean(tTaxSelect$Staphylococcus[81:83]), times=(106-80))), Cryptosporidium=c(rep(mean(tTaxSelect$Cryptosporidium[1:3]), times=26), rep(mean(tTaxSelect$Cryptosporidium[27:29]), times=(53-26)), rep(mean(tTaxSelect$Cryptosporidium[54:56]), times=(80-53)), rep(mean(tTaxSelect$Cryptosporidium[81:83]), times=(106-80))), Saccharomyces=c(rep(mean(tTaxSelect$Saccharomyces[1:3]), times=26), rep(mean(tTaxSelect$Saccharomyces[27:29]), times=(53-26)), rep(mean(tTaxSelect$Saccharomyces[54:56]), times=(80-53)), rep(mean(tTaxSelect$Saccharomyces[81:83]), times=(106-80))))
+
+tTaxSelect<-tTaxSelect/divtable
+#Remove Cryptosporidium and Saccharomyces at so low levels that large differences in abundance most likely due to large variation at low levels 
+tTaxSelect<-dplyr::select(as.data.frame(tTaxSelect), -one_of(c("Saccharomyces", "Cryptosporidium")))
+#Add row names
+tTaxSelect<-add_rownames(tTaxSelect, "Sample")
+#Add grouping variable
+tTaxSelect$Groupvarplace<-gsub("*_a|*_b|*_c", "", tTaxSelect$Sample)
+tTaxSelect$Groupvar<-gsub("DTU2016_MG_[0-9][0-9][0-9]_HX_*", "", tTaxSelect$Groupvarplace)
+tTaxSelect<-dplyr::select(as.data.frame(tTaxSelect), -one_of(c("Sample", "Groupvarplace")))
+#Long format
+tTaxSelect <- melt(tTaxSelect, id.var="Groupvar")
+#Log values
+tTaxSelect$value <- log2(tTaxSelect$value)
+#Calculate average and variation
+tTaxSelect <- summarySE(tTaxSelect, measurevar="value", groupvars=c("Groupvar", "variable"))
+#Add plotting variables
+#Sample
+tTaxSelect$Sample<-gsub("*_0h|*_16h_80C|*_16h_20C|*_16h_5C|*_16h_22C|*_64h_80C|*_64h_20C|*_64h_5C|*_64h_22C", "", tTaxSelect$Groupvar)
+#Time 
+tTaxSelect$place<-gsub("P1_*|P2_*|S1_*|S2_*", "", tTaxSelect$Groupvar) 
+tTaxSelect$Timeplace<-gsub("*h|*h_80C|*h_20C|*h_5C|*h_22C", "", tTaxSelect$place)
+#Have to specify as.character eventhough it is also encoded as a character and also have to assign it to a new variable
+tTaxSelect$Time<-as.numeric(as.character(tTaxSelect$Time))
+#Temperature
+tTaxSelect$Temperature<-gsub("16h_*|64h_*", "", tTaxSelect$place)
+tTaxSelect$Temperature<-gsub("20C", "-20C", tTaxSelect$Temperature)
+tTaxSelect$Temperature<-gsub("80C", "-80C", tTaxSelect$Temperature)
+Tempvec<-tTaxSelect$Temperature[7:30]
+#Add time 0 to all temperature settings sample
+tTaxSelect <- bind_rows(tTaxSelect[1:6,], tTaxSelect[1:6,], tTaxSelect[1:6,], tTaxSelect[1:6,], tTaxSelect[7:54,], tTaxSelect[55:60,], tTaxSelect[55:60,], tTaxSelect[55:60,], tTaxSelect[55:60,], tTaxSelect[61:108,], tTaxSelect[109:114,], tTaxSelect[109:114,], tTaxSelect[109:114,], tTaxSelect[109:114,], tTaxSelect[115:162,], tTaxSelect[163:168,], tTaxSelect[163:168,], tTaxSelect[163:168,], tTaxSelect[163:168,], tTaxSelect[169:216,])
+#New temperature vector
+tTaxSelect$Temperature <- c(rep(Tempvec, Times=9))  
+tTaxSelect$Temperature<-ordered(tTaxSelect$Temperature, levels=c("-80C", "-20C", "5C", "22C"))  
+
+
+
+
+```
+
+### 5 Plotting
+```{r}
+tTaxSelect$variable<-ordered(tTaxSelect$variable, levels=c("Propionibacterium", "Staphylococcus", "Bacteroides","Fusobacterium", "Escherichia", "Salmonella", "Saccharomyces", "Cryptosporidium"))
+
+pdf(paste("LinePlotsMCorgs", Subset, ".pdf", sep=""))
+ggplot(data=tTaxSelect, aes(x=Time, y=value, group=variable, color=variable)) + 
+    geom_errorbar(aes(ymin=value-ci, ymax=value+ci), width=.001, 
+    position=position_dodge(2.5)) +
+    geom_line(linetype="dotted") + 
+    geom_point(position=position_dodge(2.5)) +
+    scale_color_brewer(palette="Set1") + 
+    theme_minimal() + 
+    facet_grid(rows=vars(Temperature), cols=vars(Sample), scales = "free") +  
+    #scale_y_log2() #Made a column with log scaled values
+    ggtitle("Lineplots scaled to the value at 0h") + 
+    labs(colour="Organism", x = "Time (h)", y = "log2(value±ci)") + 
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="bottom") +
+    guides(fill = guide_legend(nrow = 1))
+dev.off()
+
+#range(tTaxSelect$value)
+#tTaxSelect$min<-tTaxSelect$value-tTaxSelect$ci
+#range(tTaxSelect$min)
+#tTaxSelect$max<-tTaxSelect$value+tTaxSelect$ci
+#range(tTaxSelect$max)
+```
+
+
+## Analysis spiked no background correction
+### Changes
+In subset: Allunspiked --> Allspiked    
+Change accordingly in divtable   
+Do not remove Saccharomyces and Cryptosporidium    
+Remove MC from sample column    
+Change in tempvec to account for the inclusion of Saccharomyces and Cryptosporidium  
+
+### 1 Define variables
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- "Allspiked"
+#All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked  
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+```
+
+### 2 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 3 Subsetting also in metadata file
+```{r}
+#Subsetting metadata
+if (Subset=="Allspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubExp=="HX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata2<-filter(Metadata, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata2$Matching_samples)
+  Metadata<-filter(Metadata, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata2)
+} else if (SubExp=="HXFTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax<-dplyr::select(Tax, one_of(Metadata$Sample))
+```
+
+### 4 Analysis setup
+**WOrkflow**   
+a) Changes scaled according to time 0h for each MC organisms. Creating a table consisting of the mean measure of each of the MC organisms at time 0h. Here the same dimension as the dataframe of MC organisms is created to divide the two dataframes.
+b) log values with base 2.
+c) Calculate mean and dispersion measures for each storage group
+d) Make seperate 0h measures for each temperature used for plotting to represent initial processing at 0h.
+```{r}
+##Select organisms that were spiked with
+SelOrgs<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+tTaxSelect<-dplyr::select(as.data.frame(t(Tax)), one_of(c(SelOrgs)))
+
+##Divide with the mean at 0h
+#Create df for division
+divtable <- data.frame(Escherichia=c(rep(mean(tTaxSelect$Escherichia[1:3]), times=27), rep(mean(tTaxSelect$Escherichia[28:30]), times=(54-27)), rep(mean(tTaxSelect$Escherichia[55:57]), times=(79-54)), rep(mean(tTaxSelect$Escherichia[80:82]), times=(106-79))), Bacteroides=c(rep(mean(tTaxSelect$Bacteroides[1:3]), times=27), rep(mean(tTaxSelect$Bacteroides[28:30]), times=(54-27)), rep(mean(tTaxSelect$Bacteroides[55:57]), times=(79-54)), rep(mean(tTaxSelect$Bacteroides[80:82]), times=(106-79))), Salmonella=c(rep(mean(tTaxSelect$Salmonella[1:3]), times=27), rep(mean(tTaxSelect$Salmonella[28:30]), times=(54-27)), rep(mean(tTaxSelect$Salmonella[55:57]), times=(79-54)), rep(mean(tTaxSelect$Salmonella[80:82]), times=(106-79))), Fusobacterium=c(rep(mean(tTaxSelect$Fusobacterium[1:3]), times=27), rep(mean(tTaxSelect$Fusobacterium[28:30]), times=(54-27)), rep(mean(tTaxSelect$Fusobacterium[55:57]), times=(79-54)), rep(mean(tTaxSelect$Fusobacterium[80:82]), times=(106-79))), Propionibacterium=c(rep(mean(tTaxSelect$Propionibacterium[1:3]), times=27), rep(mean(tTaxSelect$Propionibacterium[28:30]), times=(54-27)), rep(mean(tTaxSelect$Propionibacterium[55:57]), times=(79-54)), rep(mean(tTaxSelect$Propionibacterium[80:82]), times=(106-79))), Staphylococcus=c(rep(mean(tTaxSelect$Staphylococcus[1:3]), times=27), rep(mean(tTaxSelect$Staphylococcus[28:30]), times=(54-27)), rep(mean(tTaxSelect$Staphylococcus[55:57]), times=(79-54)), rep(mean(tTaxSelect$Staphylococcus[80:82]), times=(106-79))), Cryptosporidium=c(rep(mean(tTaxSelect$Cryptosporidium[1:3]), times=27), rep(mean(tTaxSelect$Cryptosporidium[28:30]), times=(54-27)), rep(mean(tTaxSelect$Cryptosporidium[55:57]), times=(79-54)), rep(mean(tTaxSelect$Cryptosporidium[80:82]), times=(106-79))), Saccharomyces=c(rep(mean(tTaxSelect$Saccharomyces[1:3]), times=27), rep(mean(tTaxSelect$Saccharomyces[28:30]), times=(54-27)), rep(mean(tTaxSelect$Saccharomyces[55:57]), times=(79-54)), rep(mean(tTaxSelect$Saccharomyces[80:82]), times=(106-79))))
+
+tTaxSelect<-tTaxSelect/divtable
+##Remove Cryptosporidium and Saccharomyces at so low levels that large differences in abundance most likely due to large variation at low levels 
+#tTaxSelect<-select(as.data.frame(tTaxSelect), -one_of(c("Saccharomyces", "Cryptosporidium")))
+#Add row names
+tTaxSelect<-add_rownames(tTaxSelect, "Sample")
+#Add grouping variable
+tTaxSelect$Groupvarplace<-gsub("*_a|*_b|*_c", "", tTaxSelect$Sample)
+tTaxSelect$Groupvar<-gsub("DTU2016_MG_[0-9][0-9][0-9]_HX_*", "", tTaxSelect$Groupvarplace)
+tTaxSelect<-dplyr::select(as.data.frame(tTaxSelect), -one_of(c("Sample", "Groupvarplace")))
+#Long format
+tTaxSelect <- melt(tTaxSelect, id.var="Groupvar")
+#Log values
+tTaxSelect$value <- log2(tTaxSelect$value)
+#Calculate average and variation
+tTaxSelect <- summarySE(tTaxSelect, measurevar="value", groupvars=c("Groupvar", "variable"))
+#Add plotting variables
+#Sample
+tTaxSelect$Sample<-gsub("*MC_0h|*MC_16h_80C|*MC_16h_20C|*MC_16h_5C|*MC_16h_22C|*MC_64h_80C|*MC_64h_20C|*MC_64h_5C|*MC_64h_22C", "", tTaxSelect$Groupvar)
+#Time 
+tTaxSelect$place<-gsub("P1MC_*|P2MC_*|S1MC_*|S2MC_*", "", tTaxSelect$Groupvar) 
+tTaxSelect$Timeplace<-gsub("*h|*h_80C|*h_20C|*h_5C|*h_22C", "", tTaxSelect$place)
+#Have to specify as.character eventhough it is also encoded as a character and also have to assign it to a new variable
+tTaxSelect$Time<-as.numeric(as.character(tTaxSelect$Time))
+#Temperature
+tTaxSelect$Temperature<-gsub("16h_*|64h_*", "", tTaxSelect$place) 
+tTaxSelect$Temperature<-gsub("20C", "-20C", tTaxSelect$Temperature)
+tTaxSelect$Temperature<-gsub("80C", "-80C", tTaxSelect$Temperature)
+Tempvec<-tTaxSelect$Temperature[9:40]
+#Add time 0 to all temperature settings sample
+tTaxSelect <- bind_rows(tTaxSelect[1:8,], tTaxSelect[1:8,], tTaxSelect[1:8,], tTaxSelect[1:8,], tTaxSelect[9:72,], tTaxSelect[73:80,], tTaxSelect[73:80,], tTaxSelect[73:80,], tTaxSelect[73:80,], tTaxSelect[81:144,], tTaxSelect[145:152,], tTaxSelect[145:152,], tTaxSelect[145:152,], tTaxSelect[145:152,], tTaxSelect[153:216,], tTaxSelect[217:224,], tTaxSelect[217:224,], tTaxSelect[217:224,], tTaxSelect[217:224,], tTaxSelect[225:288,])
+#New temperature vector
+tTaxSelect$Temperature <- c(rep(Tempvec, Times=9))  
+tTaxSelect$Temperature<-ordered(tTaxSelect$Temperature, levels=c("-80C", "-20C", "5C", "22C"))
+
+
+
+```
+
+### 5 Plotting
+```{r}
+tTaxSelect$variable<-ordered(tTaxSelect$variable, levels=c("Propionibacterium", "Staphylococcus", "Bacteroides","Fusobacterium", "Escherichia", "Salmonella", "Saccharomyces", "Cryptosporidium"))
+
+pdf(paste("SF11LinePlotsMCorgs", Subset, ".pdf", sep=""))
+ggplot(data=tTaxSelect, aes(x=Time, y=value, group=variable, color=variable)) + 
+    geom_errorbar(aes(ymin=value-ci, ymax=value+ci), width=.001, 
+    position=position_dodge(2.5)) +
+    geom_line(linetype="dotted") + 
+    geom_point(position=position_dodge(2.5)) +
+    scale_color_brewer(palette="Set1") + 
+    theme_minimal() + 
+    facet_grid(rows=vars(Temperature), cols=vars(Sample), scales = "free") +  
+    #scale_y_log2() #Made a column with log scaled values
+    ggtitle("Lineplots scaled to the value at 0h") + 
+    labs(colour="Organism", x = "Time (h)", y = "log2(value±ci)") + 
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="bottom") +
+    guides(fill = guide_legend(nrow = 1))
+dev.off()
+
+png(paste("SF11LinePlotsMCorgs", Subset, ".png", sep=""))
+ggplot(data=tTaxSelect, aes(x=Time, y=value, group=variable, color=variable)) + 
+    geom_errorbar(aes(ymin=value-ci, ymax=value+ci), width=.001, 
+    position=position_dodge(2.5)) +
+    geom_line(linetype="dotted") + 
+    geom_point(position=position_dodge(2.5)) +
+    scale_color_brewer(palette="Set1") + 
+    theme_minimal() + 
+    facet_grid(rows=vars(Temperature), cols=vars(Sample), scales = "free") +  
+    #scale_y_log2() #Made a column with log scaled values
+    ggtitle("Lineplots scaled to the value at 0h") + 
+    labs(colour="Organism", x = "Time (h)", y = "log2(value±ci)") + 
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="bottom") +
+    guides(fill = guide_legend(nrow = 1))
+dev.off()
+
+#range(tTaxSelect$value)
+#tTaxSelect$min<-tTaxSelect$value-tTaxSelect$ci
+#range(tTaxSelect$min)
+#tTaxSelect$max<-tTaxSelect$value+tTaxSelect$ci
+#range(tTaxSelect$max)
+```
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+
+
+
+
+
+
+
+

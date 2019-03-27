@@ -1,0 +1,352 @@
+---
+title: "Ordination PCoA with subsetting to sample level"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+Creating PCoA plots with subsetting to sample level and if samples were spiked or unspiked.  
+Validation plots in the form of stressplots and screeplots are included. 
+
+### Packages
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(gridExtra)
+library(reshape2)
+library(tidyr)
+```
+
+## Define variables
+Subset is a vector that is used to loop across the defined subsetting
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("P1spiked", "P1unspiked", "P2spiked", "P2unspiked", "S1spiked", "S1unspiked", "S2spiked", "S2unspiked") #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Filtering which organisms to include
+OrgFlt<-"All" #All, Bac, BacSacCry, BacArcVirSacCry 
+
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log, DESeqTrans
+
+#Vegdist dissimilarity method
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+```
+
+
+
+## Analysis
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 2 Subsetting and creating PCoAs stored in lists
+```{r}
+# Create a list to hold the plot objects.
+ScreeList <- list()
+StressList <- list()
+PCoAList <- list()
+vec<-vector()
+
+
+for (i in Subset) {
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (i=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (i=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (i=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (i=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (i=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (i=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (i=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (i=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (i=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (i=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (i=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (i=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (i=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (i=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (i=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (i=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (i=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#Add title to plots
+if (i=="P1spiked") {
+  P<-"PCoA pig feces 1 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="P1unspiked") {
+  P<-"PCoA pig feces 1 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="P2spiked") {
+  P<-"PCoA pig feces 2 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="P2unspiked") {
+  P<-"PCoA pig feces 2 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S1spiked") {
+  P<-"PCoA sewage 1 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S1unspiked") {
+  P<-"PCoA sewage 1 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S2spiked") {
+  P<-"PCoA sewage 2 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S2unspiked") {
+  P<-"PCoA sewage 2 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else {
+  print("Subset defined not valid")
+}
+
+
+#6 PCoA with capscale can also generate stressplots
+distobj<-vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+#Multi dimensional scaling with capscale 
+PCoAcsObject<-capscale(distobj~1)
+
+
+#Make stressplot
+#Extract ordination distances and merge with observed dissimilarity
+stress<-stressplot(PCoAcsObject)
+df <- melt(as.matrix(stress))
+names(df)<-c("rowOrd", "colOrd", "OrdDist")
+df<-filter(df, OrdDist>0)
+df2 <- melt(as.matrix(distobj))
+names(df2)<-c("rowObs", "colObs", "ObsDism")
+df2<-filter(df2, ObsDism>0)
+df<-unite(df, mergecol, c(rowOrd, colOrd), remove=FALSE)
+df2<-unite(df2, mergecol, c(rowObs, colObs), remove=FALSE)
+ggstress<-merge(df, df2, by="mergecol")
+
+#Create plot name
+pltName <- paste( 'stress', i, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot(ggstress) + 
+  geom_point(aes(ObsDism, OrdDist)) +
+  ggtitle(S) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+##Add eig to plot axes. with cmdscale there are negative values not with capscale
+eig <- PCoAcsObject$CA$eig
+# Calculate the variation explained by PCoA1, 2, 3 and 4
+# and use it to generate axis labels
+eig_1_2 <- eig[1:4] / sum(eig) * 100
+eig_1 <- paste("PCoA1", round(eig_1_2[1], digits = 2), "% variance")
+eig_2 <- paste("PCoA2", round(eig_1_2[2], digits = 2), "% variance")
+eig_3 <- paste("PCoA3", round(eig_1_2[3], digits = 2), "% variance")
+eig_4 <- paste("PCoA4", round(eig_1_2[4], digits = 2), "% variance")
+
+##Pull out coordinates for plotting from the ca object
+#Structuring to add to Metadata2
+PCoACA<-PCoAcsObject$CA #The ca object contains the actual ordination results: u ((Weighted) orthonormal site        scores), v ((Weighted) orthonormal species scores) all na in mine, Xbar (The standardized data matrix after          previous stages of analysis), and imaginary.u.eig ???. Info                                     http://cc.oulu.fi/~jarioksa/softhelp/vegan/html/cca.object.html   
+PCoA<-as.data.frame(PCoACA$u)
+#Change colnames. Now add dis and trans info to names 
+colnames(PCoA) <- c("MDS1BrayHel","MDS2BrayHel", "MDS3BrayHel","MDS4BrayHel")
+#Add row names to df
+PCoA$Sample <- row.names(PCoA)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, PCoA, by="Sample")
+
+
+#Creating column in Metadata2 for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Direct"
+
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Direct", "-80", "-20", "5", "22"))
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Direct", "-80", "-20", "5", "22"))
+
+
+#Create plot name
+pltName <- paste( 'PCoA', i, sep = '' )
+#create PCoA
+PCoAList[[ pltName ]]<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Replicate_Boxplot)) +  
+  geom_point(aes(MDS1BrayHel, MDS2BrayHel, color = Temperature, group=Sample, shape = Time)) +
+  scale_color_manual(values=c("#999999", "#0571b0", "#92c5de", "#f4a582", "#ca0020")) + 
+  ggtitle(P) + 
+  labs(colour="Temperature / °C", shape="Time / h", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none") #+ 
+  #scale_y_reverse() #If you want the y scale reversed, to make plots easier to compare
+  #scale_x_reverse() #If you want the x scale reversed, to make plots easier to compare
+#ggsave(paste("CapscalePCoAYoungCOMPARE", "Genus", i, OrgFlt, ".pdf", sep=""), height=6, width=12)
+#ggtitle(paste("PCoA ", i, " n orgs > 1% = ", nrow(Tax2))) #Used with filtering
+
+#Screeplot 
+screeplot<-data.frame(PCoAcsObject$CA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', i, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + 
+  ggtitle(C) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCapscalePCoA", "Genus", i, OrgFlt, ".pdf", sep=""), height=6, width=12)
+}
+```
+
+
+### 3 Create figures 
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,1,4,4,7,7,10,10),
+             c(1,1,4,4,7,7,10,10),
+             c(2,3,5,6,8,9,11,12),
+             c(13,13,16,16,19,19,22,22),
+             c(13,13,16,16,19,19,22,22),
+             c(14,15,17,18,20,21,23,24))
+pdf(paste("PCoA", "Genus", ".pdf", sep=""), width=24, height=12)
+grid.arrange(PCoAList$PCoAP1spiked, ScreeList$screeP1spiked, StressList$stressP1spiked, PCoAList$PCoAP2spiked, ScreeList$screeP2spiked, StressList$stressP2spiked, PCoAList$PCoAS1spiked, ScreeList$screeS1spiked, StressList$stressS1spiked, PCoAList$PCoAS2spiked, ScreeList$screeS2spiked, StressList$stressS2spiked, PCoAList$PCoAP1unspiked, ScreeList$screeP1unspiked, StressList$stressP1unspiked, PCoAList$PCoAP2unspiked, ScreeList$screeP2unspiked, StressList$stressP2unspiked, PCoAList$PCoAS1unspiked, ScreeList$screeS1unspiked, StressList$stressS1unspiked, PCoAList$PCoAS2unspiked, ScreeList$screeS2unspiked, StressList$stressS2unspiked, layout_matrix = lay)
+dev.off()
+
+#Alternative lay
+#Have the plots stored in lists
+lay <- rbind(c(1,1,13,13),
+             c(1,1,13,13),
+             c(2,3,14,15),
+             c(4,4,16,16),
+             c(4,4,16,16),
+             c(5,6,17,18),
+             c(7,7,19,19),
+             c(7,7,19,19),
+             c(8,9,20,21),
+             c(10,10,22,22),
+             c(10,10,22,22),
+             c(11,12,23,24))
+pdf(paste("SF5PCoA", "Tall", ".pdf", sep=""), width=12, height=20)
+grid.arrange(PCoAList$PCoAP1unspiked, ScreeList$screeP1unspiked, StressList$stressP1unspiked, PCoAList$PCoAP2unspiked, ScreeList$screeP2unspiked, StressList$stressP2unspiked, PCoAList$PCoAS1unspiked, ScreeList$screeS1unspiked, StressList$stressS1unspiked, PCoAList$PCoAS2unspiked, ScreeList$screeS2unspiked, StressList$stressS2unspiked, PCoAList$PCoAP1spiked, ScreeList$screeP1spiked, StressList$stressP1spiked, PCoAList$PCoAP2spiked, ScreeList$screeP2spiked, StressList$stressP2spiked, PCoAList$PCoAS1spiked, ScreeList$screeS1spiked, StressList$stressS1spiked, PCoAList$PCoAS2spiked, ScreeList$screeS2spiked, StressList$stressS2spiked, layout_matrix = lay)
+dev.off()
+
+png(paste("SF5PCoA", "Tall", ".png", sep=""), width=900, height=1500)
+grid.arrange(PCoAList$PCoAP1unspiked, ScreeList$screeP1unspiked, StressList$stressP1unspiked, PCoAList$PCoAP2unspiked, ScreeList$screeP2unspiked, StressList$stressP2unspiked, PCoAList$PCoAS1unspiked, ScreeList$screeS1unspiked, StressList$stressS1unspiked, PCoAList$PCoAS2unspiked, ScreeList$screeS2unspiked, StressList$stressS2unspiked, PCoAList$PCoAP1spiked, ScreeList$screeP1spiked, StressList$stressP1spiked, PCoAList$PCoAP2spiked, ScreeList$screeP2spiked, StressList$stressP2spiked, PCoAList$PCoAS1spiked, ScreeList$screeS1spiked, StressList$stressS1spiked, PCoAList$PCoAS2spiked, ScreeList$screeS2spiked, StressList$stressS2spiked, layout_matrix = lay)
+dev.off()
+
+```
+
+
+
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+
+
+
+

@@ -1,0 +1,622 @@
+
+---
+title: "Heatmaps"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+** Have to run the CCA script "SF6CCA.Rmd" first **  
+Creating heatmaps, this can also be modified to create it for spiked samples.  
+
+
+### CCA object left 
+```{r}
+# Removing other objects that the list storing CCA plots
+rm(list=setdiff(ls(), "CCAList"))
+#To get CCA run "SF6CCA.Rmd"
+```
+
+### Packages
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(scales) #Graphical scales map data to aesthetics, and provide methods for automatically determining breaks and labels for axes and legends. help(package="scales")
+library(pheatmap) # Implementation of heatmaps that offers more control over dimensions and appearance help(package="pheatmap")
+library(gridExtra)
+library(grid)
+library(lattice)
+```
+
+## Analysis
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 2 Define variables Allunspiked
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("Allunspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Vegdist dissimilarity method. For sample clustering
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+
+#Decostand standardization method. For sample clustering. Doing a log afterwards in the script
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log
+
+#The organisms clustering
+OrgCluster<-"correlation" #correlation, euclidean, maximum, manhattan, canberra, binary, minkowski 
+
+#How many organisms to include in heatmap
+Orgs<-30 #Write a number 30-100 seems appropiate for readability
+
+HeatmapExplainers<-c("Experiment", "Time", "Temperature")
+#All: c("Experiment_type", "Experiment", "SpikedUnspiked", "Time", "Temperature")
+#AllS, AllU: c("Experiment_type", "Experiment", "Time", "Temperature") 
+#PF, SW: c("Experiment_type", "Experiment", "SpikedUnspiked", "Time", "Temperature")
+#P1, S1: c("Experiment_type", "SpikedUnspiked", "Time", "Temperature", "Replicate_Groups")
+#P1S, P1U, S1S, S1U: c("Experiment_type", "Time", "Temperature", "Replicate_Groups")
+#P2, S2: c("SpikedUnspiked", "Time", "Temperature", "Replicate_Groups")
+#P2S, P2U, S2S, S2U: c("Time", "Temperature", "Replicate_Groups")
+
+#Make list of annotation colors
+annotation_colorsNew = list(Experiment_type = c(Handling_experiment = "blue"), Experiment = c(Pig_feces_1 = "#30241E", Pig_feces_2 = "#B59B80", Sewage_1 = "#33a02c", Sewage_2 = "#B2DF8A"), SpikedUnspiked = c(Spiked = "Black", Unspiked = "White"), Time = c("0" = "#FFFFFF", "16" = "#CCCCCC", "64" = "#666666"), Temperature = c(Direct = "#999999", "-80" = "#0571b0", "-20" = "#92c5de", "5" = "#f4a582", "22" = "#ca0020"))
+#HX: list(Experiment_type = c(Handling_experiment = "blue"), Experiment = c(Pig_feces_1 = "#663300", Pig_feces_2 = "#FF9900", Sewage_1 = "#006600", Sewage_2 = "#33FF33"), SpikedUnspiked = c(Spiked = "Black", Unspiked = "White"), Time = c("0" = "#FFFFFF", "16" = "#CCCCCC", "64" = "#666666"), Temperature = c(Direct = "#999999", "-80" = "#0571b0", "-20" = "#92c5de", "5" = "#f4a582", "22" = "#ca0020"))
+#HXFTX: list(Experiment_type = c(Handling_experiment = "#0033FF", Freeze_thaw_experiment = "#0099FF"), Experiment = c(Pig_feces_1 = "#663300", Pig_feces_2 = "#FF9900", Sewage_1 = "#006600", Sewage_2 = "#33FF33"), SpikedUnspiked = c(Spiked = "Black", Unspiked = "White"), Time = c("0" = "#FFFFFF", "16" = "#CCCCCC", "40" = "#999999", "64" = "#666666", "88" = "#333333"), Temperature = c(Direct = "#999999", "-80" = "#0571b0", "-20" = "#92c5de", "5" = "#f4a582", "22" = "#ca0020"))
+#PF or SW or FTX: Remove colours for the samples that are not included and Experiment_type 
+
+#make empty list for plots
+plot_list=list()
+```
+
+### 3 Subsetting 
+```{r}
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+```
+
+
+
+### 4 Heatmap
+```{r, fig.height=12, fig.width=14}
+##Consider removing some organisms PF ("Prevotella", "Treponema", "Phascolarctobacterium", "Unknown") keep getting heatmaps that are all blue with one or two abundant orgs.  
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% c("Unknown"), ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remove orgs that are not present after subsetting. Need for doing standardize
+Tax2 <- Tax2[rowSums(Tax2)>0,]
+
+##Hellinger transformation
+#TaxHeatmap <- data.frame(t(decostand(t(Tax2), method=Stand)))
+TaxHeatmap <- Tax2
+
+#Order genera, based on rowsums
+TaxHeatmap <- Tax2[order(rowSums(TaxHeatmap), decreasing = T),]
+
+#Impose a maximum number of plotted Species
+TaxHeatmap <- TaxHeatmap[1:min(c(nrow(TaxHeatmap), Orgs)),]
+
+##Then I standardized the orgs into zero mean and unit variance
+TaxHeatmap <- data.frame(t(decostand(t(TaxHeatmap), method="standardize"))) #Can also use scale in pheatmap, but not exactly sure what scaling that is being performed
+
+##This is what I did previously. Now I changed it to do a Hellinger transformation, which is total sum scaling and then square rooting each entry. Doing it on total sum scaled data since then it is also normalized according to genome size so in reality I'm doing total sum scaling twice. Moved to the top to do it before subsetting.   
+#Log transform OTU table with higher base pick one. 
+#TaxHeatmap <- log(TaxHeatmap+1, base = exp(200))
+#Log 10 transform OTU table 
+#TaxHeatmap <- log10(TaxHeatmap+1)
+
+
+#Make dataframe with Metadata2 for heatmap annotation
+colannodf <- data.frame(Metadata2[, HeatmapExplainers], row.names = Metadata2$Sample)
+#Depending on if time and temperature are part of the plots make them into characters 
+colannodf$Time <- as.character(colannodf$Time)
+colannodf$Temperature <- as.character(colannodf$Temperature)
+colannodf$Temperature[is.na(colannodf$Temperature)] <- "Direct" #Change NA to Direct
+
+#Calculate sample-distance matrix 
+#Note, that this is done on the full set, not just the shown. Makes sense eventhough not show in heatmap they can be in the clustering calculations, this also means samples can look more similar in the heatmap but not cluster as closely. Also calculates on the not log transformed data.
+distmatrix_Species <- vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+
+#Draw the heatmap
+plot<-pheatmap(TaxHeatmap, 
+         margins=c(8,8), 
+         treeheight_row = 100, 
+         treeheight_col = 100, 
+         scale="none", 
+         clustering_distance_cols = distmatrix_Species, 
+         clustering_distance_rows = OrgCluster, 
+         annotation_col = colannodf, 
+         cutree_cols = 2, 
+         show_colnames = FALSE, 
+         cellwidth=5, 
+         cellheight=4, 
+         fontsize=6,
+         annotation_colors = annotation_colorsNew[1:5],
+         annotation_legend = TRUE)
+
+plot_list[[Subset]] = plot[[4]]
+
+
+#Can also scale = "row", default "none"
+#Consider changing the scale so it is easier to see the differences around 0
+```
+
+
+### 5 Subset and heatmap pig feces unspiked
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("PFunspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+##Consider removing some organisms PF ("Prevotella", "Treponema", "Phascolarctobacterium", "Unknown") keep getting heatmaps that are all blue with one or two abundant orgs.  
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% c("Unknown"), ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remove orgs that are not present after subsetting. Need for doing standardize
+Tax2 <- Tax2[rowSums(Tax2)>0,]
+
+##Hellinger transformation
+#TaxHeatmap <- data.frame(t(decostand(t(Tax2), method=Stand)))
+TaxHeatmap <- Tax2
+
+#Order genera, based on rowsums
+TaxHeatmap <- Tax2[order(rowSums(TaxHeatmap), decreasing = T),]
+
+#Impose a maximum number of plotted Species
+TaxHeatmap <- TaxHeatmap[1:min(c(nrow(TaxHeatmap), Orgs)),]
+
+##Then I standardized the orgs into zero mean and unit variance
+TaxHeatmap <- data.frame(t(decostand(t(TaxHeatmap), method="standardize"))) #Can also use scale in pheatmap, but not exactly sure what scaling that is being performed
+
+##This is what I did previously. Now I changed it to do a Hellinger transformation, which is total sum scaling and then square rooting each entry. Doing it on total sum scaled data since then it is also normalized according to genome size so in reality I'm doing total sum scaling twice. Moved to the top to do it before subsetting.   
+#Log transform OTU table with higher base pick one. 
+#TaxHeatmap <- log(TaxHeatmap+1, base = exp(200))
+#Log 10 transform OTU table 
+#TaxHeatmap <- log10(TaxHeatmap+1)
+
+
+#Make dataframe with Metadata2 for heatmap annotation
+colannodf <- data.frame(Metadata2[, HeatmapExplainers], row.names = Metadata2$Sample)
+#Depending on if time and temperature are part of the plots make them into characters 
+colannodf$Time <- as.character(colannodf$Time)
+colannodf$Temperature <- as.character(colannodf$Temperature)
+colannodf$Temperature[is.na(colannodf$Temperature)] <- "Direct" #Change NA to Direct
+
+#Calculate sample-distance matrix 
+#Note, that this is done on the full set, not just the shown. Makes sense eventhough not show in heatmap they can be in the clustering calculations, this also means samples can look more similar in the heatmap but not cluster as closely. Also calculates on the not log transformed data.
+distmatrix_Species <- vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+
+#Draw the heatmap
+plot<-pheatmap(TaxHeatmap, 
+         margins=c(8,8), 
+         treeheight_row = 30, 
+         treeheight_col = 30, 
+         scale="none", 
+         clustering_distance_cols = distmatrix_Species, 
+         clustering_distance_rows = OrgCluster, 
+         annotation_col = colannodf, 
+         cutree_cols = 2, 
+         show_colnames = FALSE, 
+         cellwidth=5, 
+         cellheight=8, 
+         fontsize=8,
+         annotation_colors = annotation_colorsNew[1:5],
+         annotation_legend = TRUE)
+
+plot_list[[Subset]] = plot[[4]]
+
+#Can also scale = "row", default "none"
+#Consider changing the scale so it is easier to see the differences around 0
+
+```
+
+
+### 6 Subset and heatmap sewage unspiked
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("SWunspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+##Consider removing some organisms PF ("Prevotella", "Treponema", "Phascolarctobacterium", "Unknown") keep getting heatmaps that are all blue with one or two abundant orgs.  
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% c("Unknown"), ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remove orgs that are not present after subsetting. Need for doing standardize
+Tax2 <- Tax2[rowSums(Tax2)>0,]
+
+##Hellinger transformation
+#TaxHeatmap <- data.frame(t(decostand(t(Tax2), method=Stand)))
+TaxHeatmap <- Tax2
+
+#Order genera, based on rowsums
+TaxHeatmap <- Tax2[order(rowSums(TaxHeatmap), decreasing = T),]
+
+#Impose a maximum number of plotted Species
+TaxHeatmap <- TaxHeatmap[1:min(c(nrow(TaxHeatmap), Orgs)),]
+
+##Then I standardized the orgs into zero mean and unit variance
+TaxHeatmap <- data.frame(t(decostand(t(TaxHeatmap), method="standardize"))) #Can also use scale in pheatmap, but not exactly sure what scaling that is being performed
+
+##This is what I did previously. Now I changed it to do a Hellinger transformation, which is total sum scaling and then square rooting each entry. Doing it on total sum scaled data since then it is also normalized according to genome size so in reality I'm doing total sum scaling twice. Moved to the top to do it before subsetting.   
+#Log transform OTU table with higher base pick one. 
+#TaxHeatmap <- log(TaxHeatmap+1, base = exp(200))
+#Log 10 transform OTU table 
+#TaxHeatmap <- log10(TaxHeatmap+1)
+
+
+#Make dataframe with Metadata2 for heatmap annotation
+colannodf <- data.frame(Metadata2[, HeatmapExplainers], row.names = Metadata2$Sample)
+#Depending on if time and temperature are part of the plots make them into characters 
+colannodf$Time <- as.character(colannodf$Time)
+colannodf$Temperature <- as.character(colannodf$Temperature)
+colannodf$Temperature[is.na(colannodf$Temperature)] <- "Direct" #Change NA to Direct
+
+#Calculate sample-distance matrix 
+#Note, that this is done on the full set, not just the shown. Makes sense eventhough not show in heatmap they can be in the clustering calculations, this also means samples can look more similar in the heatmap but not cluster as closely. Also calculates on the not log transformed data.
+distmatrix_Species <- vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+
+#Draw the heatmap
+plot<-pheatmap(TaxHeatmap, 
+         margins=c(8,8), 
+         treeheight_row = 30, 
+         treeheight_col = 30, 
+         scale="none", 
+         clustering_distance_cols = distmatrix_Species, 
+         clustering_distance_rows = OrgCluster, 
+         annotation_col = colannodf, 
+         cutree_cols = 2, 
+         show_colnames = FALSE, 
+         cellwidth=5, 
+         cellheight=8, 
+         fontsize=8,
+         annotation_colors = annotation_colorsNew[1:5],
+         annotation_legend = TRUE)
+
+plot_list[[Subset]] = plot[[4]]
+
+
+#Can also scale = "row", default "none"
+#Consider changing the scale so it is easier to see the differences around 0
+```
+
+### Create figure 3 with CCA and heatmaps
+#Make figure3 
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,2),
+             c(3,4),
+             c(5,6))
+pdf(paste("MF3CCAandHeatmaps.pdf", sep=""), width=15, height=15)
+grid.arrange(CCAList$CCAP1unspiked, CCAList$CCAS1unspiked, CCAList$CCAP2unspiked, CCAList$CCAS2unspiked, plot_list$PFunspiked, plot_list$SWunspiked, layout_matrix = lay)   
+dev.off() 
+```
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+

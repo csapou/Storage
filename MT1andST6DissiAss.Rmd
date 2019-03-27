@@ -1,0 +1,337 @@
+
+---
+title: "Dissimilarity assessment"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+
+## Introduction
+Full scale overview of dissimilarities (Supplementary Table 6) and relative to 0h in unspiked (Table 1)
+
+### Packages 
+```{r}
+library(stringr) #Simple, consistent wrappers for common string operations. Like the str_replace function. help(package="stringr")
+library(Rmisc) #The Rmisc library contains many functions useful for data analysis. Include summarySE help(package="Rmisc")
+library(reshape2) #This function reshapes a data frame between 'wide' format with repeated measurements in separate columns of the same record and 'long' format with the repeated measurements in separate records help(package="reshape")
+library(vegan) #The vegan package provides tools for descriptive community ecology. It has most basic functions of diversity analysis, community ordination and dissimilarity analysis. Most of its multivariate tools can be used for other data types as well. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(tidyr) #An evolution of 'reshape2'. It's designed specifically for data tidying (not general reshaping or aggregating) and works well with 'dplyr' data pipelines. help(package="tidyr")
+```
+
+
+## Define variables
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- "All" #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Vegdist dissimilarity method
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+
+#Decostand standardization method
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log
+```
+
+##Analysis
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+
+### 2 Subsetting
+```{r}
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+```
+
+
+### 3 Long formatted Bray Curtis dissimilarities
+```{r}
+#Multi dimensional scaling 
+distmatrix <- vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+
+#Make distances into matrix
+distmatrix<-as.matrix(distmatrix)
+
+##Save table
+#write.table(distmatrix, file="DistBrayHelAll.txt", quote=F, sep="\t")
+
+#Contains all values except the ones equal to 0
+meltPwBC<-subset(melt(distmatrix), value!=0)
+rm(distmatrix)
+
+#Have comparisons of both 1vs2 and 2vs1 ..., but are removed during the following filtration
+
+
+```
+
+### 4 All average dissimilarities unspiked (see below to run spiked)
+```{r}
+BCtable <- mutate(meltPwBC, from = str_replace(Var1,"[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_","") %>% str_replace("_[a-z]$",""))
+BCtable <- mutate(BCtable, to = str_replace(Var2,"[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_","") %>% str_replace("_[a-z]$",""))
+#Remove duplicate values, be careful could have same calculation that turned out the same, removes the three 0h comparisons both ways. 
+#BCtable <- BCtable %>% distinct(value, .keep_all = TRUE)
+#Calculate averages and dispersions
+BCtable2 <- summarySE(BCtable, measurevar="value", groupvars=c("from", "to"))
+#
+BCtable2 <- select(BCtable2, one_of("from", "to", "value"))
+#cast
+BCtable2 <- spread(BCtable2, from, value)
+#Vector of desired order
+#cnam<-c("P1_0h", "P1_16h_80C", "P1_64h_80C", "P1_16h_20C", "P1_64h_20C", "P1_16h_5C", "P1_64h_5C", "P1_16h_22C", "P1_64h_22C", "P1_40h_2FTC_80C", "P1_64h_3FTC_80C", "P1_88h_4FTC_80C", "P1_40h_2FTC_20C", "P1_64h_3FTC_20C", "P1_88h_4FTC_20C", "P1_4m_80C", "P1_8m_80C", "P1_12m_80C", "P1_4m_20C", "P1_8m_20C", "P1_12m_20C", "KAHI_P1_0h", "KAHI_P1_64h_80C", "NFNS_P1_0h", "NFNS_P1_64h_80C", "P2_0h", "P2_16h_80C", "P2_64h_80C", "P2_16h_20C", "P2_64h_20C", "P2_16h_5C", "P2_64h_5C", "P2_16h_22C", "P2_64h_22C", "KAHI_P2_0h", "KAHI_P2_64h_80C", "NFNS_P2_0h", "NFNS_P2_64h_80C", "S1_0h", "S1_16h_80C", "S1_64h_80C", "S1_16h_20C", "S1_64h_20C", "S1_16h_5C", "S1_64h_5C", "S1_16h_22C", "S1_64h_22C",  "S1_40h_2FTC_80C", "S1_64h_3FTC_80C", "S1_88h_4FTC_80C", "S1_40h_2FTC_20C", "S1_64h_3FTC_20C", "S1_88h_4FTC_20C", "S1_4m_80C", "S1_8m_80C", "S1_12m_80C", "S1_4m_20C", "S1_8m_20C", "S1_12m_20C", "KAHI_S1_0h" , "KAHI_S1_64h_80C", "NFNS_S1_0h",  "NFNS_S1_64h_80C", "S2_0h", "S2_16h_80C", "S2_64h_80C", "S2_16h_20C", "S2_64h_20C", "S2_16h_5C", "S2_64h_5C", "S2_16h_22C", "S2_64h_22C", "KAHI_S2_0h", "KAHI_S2_64h_80C", "NFNS_S2_0h", "NFNS_S2_64h_80C") #All
+cnam<-c("P1_0h", "P1_16h_80C", "P1_64h_80C", "P1_16h_20C", "P1_64h_20C", "P1_16h_5C", "P1_64h_5C", "P1_16h_22C", "P1_64h_22C", "P2_0h", "P2_16h_80C", "P2_64h_80C", "P2_16h_20C", "P2_64h_20C", "P2_16h_5C", "P2_64h_5C", "P2_16h_22C", "P2_64h_22C", "S1_0h", "S1_16h_80C", "S1_64h_80C", "S1_16h_20C", "S1_64h_20C", "S1_16h_5C", "S1_64h_5C", "S1_16h_22C", "S1_64h_22C", "S2_0h", "S2_16h_80C", "S2_64h_80C", "S2_16h_20C", "S2_64h_20C", "S2_16h_5C", "S2_64h_5C", "S2_16h_22C", "S2_64h_22C") #HX
+#Order rows
+BCtable2 <- BCtable2[match(cnam, BCtable2$to),]
+#Make first column into rownames
+BCtable2 <- data.frame(BCtable2[,-1], row.names=BCtable2[,1])
+#Order columns
+BCtable2<-BCtable2[cnam]
+
+##Save table
+write.table(BCtable2, file="DisBCAllavgUnspiked.txt", quote=F, sep="\t")
+```
+
+### 5 Dissimilarities relative to 0h, 0h is comparison within the replicates
+```{r}
+P10h<-BCtable2[c("P1_0h"),] %>% select(contains("P1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C")) 
+P20h<-BCtable2[c("P2_0h"),] %>% select(contains("P2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S10h<-BCtable2[c("S1_0h"),] %>% select(contains("S1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S20h<-BCtable2[c("S2_0h"),] %>% select(contains("S2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+
+Rel0h<-rbind(P10h, P20h, S10h, S20h)
+write.table(Rel0h, file="DisBCAllavgUnspiked0h.txt", quote=F, sep="\t")
+Rel0ht<-t(Rel0h)
+write.table(Rel0ht, file="DisBCAllavgUnspiked0hTransposed.txt", quote=F, sep="\t")
+```
+
+### 6 Extract dispersion measurement
+```{r}
+#Calculate averages and dispersions
+BCtableDisp <- summarySE(BCtable, measurevar="value", groupvars=c("from", "to"))
+#
+BCtableDisp <- select(BCtableDisp, one_of("from", "to", "se"))
+#cast
+BCtableDisp <- spread(BCtableDisp, from, se)
+#Vector of desired order
+#cnam<-c("P1_0h", "P1_16h_80C", "P1_64h_80C", "P1_16h_20C", "P1_64h_20C", "P1_16h_5C", "P1_64h_5C", "P1_16h_22C", "P1_64h_22C", "P1_40h_2FTC_80C", "P1_64h_3FTC_80C", "P1_88h_4FTC_80C", "P1_40h_2FTC_20C", "P1_64h_3FTC_20C", "P1_88h_4FTC_20C", "P1_4m_80C", "P1_8m_80C", "P1_12m_80C", "P1_4m_20C", "P1_8m_20C", "P1_12m_20C", "KAHI_P1_0h", "KAHI_P1_64h_80C", "NFNS_P1_0h", "NFNS_P1_64h_80C", "P2_0h", "P2_16h_80C", "P2_64h_80C", "P2_16h_20C", "P2_64h_20C", "P2_16h_5C", "P2_64h_5C", "P2_16h_22C", "P2_64h_22C", "KAHI_P2_0h", "KAHI_P2_64h_80C", "NFNS_P2_0h", "NFNS_P2_64h_80C", "S1_0h", "S1_16h_80C", "S1_64h_80C", "S1_16h_20C", "S1_64h_20C", "S1_16h_5C", "S1_64h_5C", "S1_16h_22C", "S1_64h_22C",  "S1_40h_2FTC_80C", "S1_64h_3FTC_80C", "S1_88h_4FTC_80C", "S1_40h_2FTC_20C", "S1_64h_3FTC_20C", "S1_88h_4FTC_20C", "S1_4m_80C", "S1_8m_80C", "S1_12m_80C", "S1_4m_20C", "S1_8m_20C", "S1_12m_20C", "KAHI_S1_0h" , "KAHI_S1_64h_80C", "NFNS_S1_0h",  "NFNS_S1_64h_80C", "S2_0h", "S2_16h_80C", "S2_64h_80C", "S2_16h_20C", "S2_64h_20C", "S2_16h_5C", "S2_64h_5C", "S2_16h_22C", "S2_64h_22C", "KAHI_S2_0h", "KAHI_S2_64h_80C", "NFNS_S2_0h", "NFNS_S2_64h_80C") #All
+cnam<-c("P1_0h", "P1_16h_80C", "P1_64h_80C", "P1_16h_20C", "P1_64h_20C", "P1_16h_5C", "P1_64h_5C", "P1_16h_22C", "P1_64h_22C", "P2_0h", "P2_16h_80C", "P2_64h_80C", "P2_16h_20C", "P2_64h_20C", "P2_16h_5C", "P2_64h_5C", "P2_16h_22C", "P2_64h_22C", "S1_0h", "S1_16h_80C", "S1_64h_80C", "S1_16h_20C", "S1_64h_20C", "S1_16h_5C", "S1_64h_5C", "S1_16h_22C", "S1_64h_22C", "S2_0h", "S2_16h_80C", "S2_64h_80C", "S2_16h_20C", "S2_64h_20C", "S2_16h_5C", "S2_64h_5C", "S2_16h_22C", "S2_64h_22C") #HX
+#Order rows
+BCtableDisp <- BCtableDisp[match(cnam, BCtableDisp$to),]
+#Make first column into rownames
+BCtableDisp <- data.frame(BCtableDisp[,-1], row.names=BCtableDisp[,1])
+#Order columns
+BCtableDisp<-BCtableDisp[cnam]
+
+##Save table
+write.table(BCtableDisp, file="DisBCAllavgUnspikedSE.txt", quote=F, sep="\t")
+```
+
+### 7 Dispersion relative to 0h, 0h is comparison within the replicates
+```{r}
+P10h<-BCtableDisp[c("P1_0h"),] %>% select(contains("P1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C")) 
+P20h<-BCtableDisp[c("P2_0h"),] %>% select(contains("P2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S10h<-BCtableDisp[c("S1_0h"),] %>% select(contains("S1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S20h<-BCtableDisp[c("S2_0h"),] %>% select(contains("S2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+
+Rel0h<-rbind(P10h, P20h, S10h, S20h)
+write.table(Rel0h, file="DisBCAllavgUnspiked0hSE.txt", quote=F, sep="\t")
+Rel0ht<-t(Rel0h)
+write.table(Rel0ht, file="DisBCAllavgUnspiked0hTransposedSE.txt", quote=F, sep="\t")
+```
+
+### 8 All average dissimilarities spiked
+```{r}
+BCtable <- mutate(meltPwBC, from = str_replace(Var1,"[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_","") %>% str_replace("_[a-z]$",""))
+BCtable <- mutate(BCtable, to = str_replace(Var2,"[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_[A-X0-9]*_","") %>% str_replace("_[a-z]$",""))
+#Remove duplicate values, be careful could have same calculation that turned out the same, removes the three 0h comparisons both ways. 
+#BCtable <- BCtable %>% distinct(value, .keep_all = TRUE)
+#Calculate averages and dispersions
+BCtable2 <- summarySE(BCtable, measurevar="value", groupvars=c("from", "to"))
+#
+BCtable2 <- select(BCtable2, one_of("from", "to", "value"))
+#cast
+BCtable2 <- spread(BCtable2, from, value)
+#Vector of desired order
+#cnam<-c("P1MC_0h", "P1MC_16h_80C", "P1MC_64h_80C", "P1MC_16h_20C", "P1MC_64h_20C", "P1MC_16h_5C", "P1MC_64h_5C", "P1MC_16h_22C", "P1MC_64h_22C", "P1MC_40h_2FTC_80C", "P1MC_64h_3FTC_80C", "P1MC_88h_4FTC_80C", "P1MC_40h_2FTC_20C", "P1MC_64h_3FTC_20C", "P1MC_88h_4FTC_20C", "P1MC_4m_80C", "P1MC_8m_80C", "P1MC_12m_80C", "P1MC_4m_20C", "P1MC_8m_20C", "P1MC_12m_20C", "P2MC_0h", "P2MC_16h_80C", "P2MC_64h_80C", "P2MC_16h_20C", "P2MC_64h_20C", "P2MC_16h_5C", "P2MC_64h_5C", "P2MC_16h_22C", "P2MC_64h_22C", "S1MC_0h", "S1MC_16h_80C", "S1MC_64h_80C", "S1MC_16h_20C", "S1MC_64h_20C", "S1MC_16h_5C", "S1MC_64h_5C", "S1MC_16h_22C", "S1MC_64h_22C",  "S1MC_40h_2FTC_80C", "S1MC_64h_3FTC_80C", "S1MC_88h_4FTC_80C", "S1MC_40h_2FTC_20C", "S1MC_64h_3FTC_20C", "S1MC_88h_4FTC_20C", "S1MC_4m_80C", "S1MC_8m_80C", "S1MC_12m_80C", "S1MC_4m_20C", "S1MC_8m_20C", "S1MC_12m_20C", "S2MC_0h", "S2MC_16h_80C", "S2MC_64h_80C", "S2MC_16h_20C", "S2MC_64h_20C", "S2MC_16h_5C", "S2MC_64h_5C", "S2MC_16h_22C", "S2MC_64h_22C") #All
+cnam<-c("P1MC_0h", "P1MC_16h_80C", "P1MC_64h_80C", "P1MC_16h_20C", "P1MC_64h_20C", "P1MC_16h_5C", "P1MC_64h_5C", "P1MC_16h_22C", "P1MC_64h_22C", "P2MC_0h", "P2MC_16h_80C", "P2MC_64h_80C", "P2MC_16h_20C", "P2MC_64h_20C", "P2MC_16h_5C", "P2MC_64h_5C", "P2MC_16h_22C", "P2MC_64h_22C", "S1MC_0h", "S1MC_16h_80C", "S1MC_64h_80C", "S1MC_16h_20C", "S1MC_64h_20C", "S1MC_16h_5C", "S1MC_64h_5C", "S1MC_16h_22C", "S1MC_64h_22C", "S2MC_0h", "S2MC_16h_80C", "S2MC_64h_80C", "S2MC_16h_20C", "S2MC_64h_20C", "S2MC_16h_5C", "S2MC_64h_5C", "S2MC_16h_22C", "S2MC_64h_22C") #HX
+#Order rows
+BCtable2 <- BCtable2[match(cnam, BCtable2$to),]
+#Make first column into rownames
+BCtable2 <- data.frame(BCtable2[,-1], row.names=BCtable2[,1])
+#Order columns
+BCtable2<-BCtable2[cnam]
+
+#Save table
+write.table(BCtable2, file="DisBCAllavgSpiked.txt", quote=F, sep="\t")
+```
+
+### 9 Dissimilarities relative to 0h, 0h is comparison within the replicates
+```{r}
+P10h<-BCtable2[c("P1_0h"),] %>% select(contains("P1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C")) 
+P20h<-BCtable2[c("P2_0h"),] %>% select(contains("P2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S10h<-BCtable2[c("S1_0h"),] %>% select(contains("S1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S20h<-BCtable2[c("S2_0h"),] %>% select(contains("S2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+
+Rel0h<-rbind(P10h, P20h, S10h, S20h)
+write.table(Rel0h, file="DisBCAllavgSpiked0h.txt", quote=F, sep="\t")
+Rel0ht<-t(Rel0h)
+write.table(Rel0ht, file="DisBCAllavgSpiked0hTransposed.txt", quote=F, sep="\t")
+```
+
+### 10 Extract dispersion measurement
+```{r}
+#Calculate averages and dispersions
+BCtableDisp <- summarySE(BCtable, measurevar="value", groupvars=c("from", "to"))
+#
+BCtableDisp <- select(BCtableDisp, one_of("from", "to", "se"))
+#cast
+BCtableDisp <- spread(BCtableDisp, from, se)
+#Vector of desired order
+#cnam<-c("P1_0h", "P1_16h_80C", "P1_64h_80C", "P1_16h_20C", "P1_64h_20C", "P1_16h_5C", "P1_64h_5C", "P1_16h_22C", "P1_64h_22C", "P1_40h_2FTC_80C", "P1_64h_3FTC_80C", "P1_88h_4FTC_80C", "P1_40h_2FTC_20C", "P1_64h_3FTC_20C", "P1_88h_4FTC_20C", "P1_4m_80C", "P1_8m_80C", "P1_12m_80C", "P1_4m_20C", "P1_8m_20C", "P1_12m_20C", "KAHI_P1_0h", "KAHI_P1_64h_80C", "NFNS_P1_0h", "NFNS_P1_64h_80C", "P2_0h", "P2_16h_80C", "P2_64h_80C", "P2_16h_20C", "P2_64h_20C", "P2_16h_5C", "P2_64h_5C", "P2_16h_22C", "P2_64h_22C", "KAHI_P2_0h", "KAHI_P2_64h_80C", "NFNS_P2_0h", "NFNS_P2_64h_80C", "S1_0h", "S1_16h_80C", "S1_64h_80C", "S1_16h_20C", "S1_64h_20C", "S1_16h_5C", "S1_64h_5C", "S1_16h_22C", "S1_64h_22C",  "S1_40h_2FTC_80C", "S1_64h_3FTC_80C", "S1_88h_4FTC_80C", "S1_40h_2FTC_20C", "S1_64h_3FTC_20C", "S1_88h_4FTC_20C", "S1_4m_80C", "S1_8m_80C", "S1_12m_80C", "S1_4m_20C", "S1_8m_20C", "S1_12m_20C", "KAHI_S1_0h" , "KAHI_S1_64h_80C", "NFNS_S1_0h",  "NFNS_S1_64h_80C", "S2_0h", "S2_16h_80C", "S2_64h_80C", "S2_16h_20C", "S2_64h_20C", "S2_16h_5C", "S2_64h_5C", "S2_16h_22C", "S2_64h_22C", "KAHI_S2_0h", "KAHI_S2_64h_80C", "NFNS_S2_0h", "NFNS_S2_64h_80C") #All
+cnam<-c("P1_0h", "P1_16h_80C", "P1_64h_80C", "P1_16h_20C", "P1_64h_20C", "P1_16h_5C", "P1_64h_5C", "P1_16h_22C", "P1_64h_22C", "P2_0h", "P2_16h_80C", "P2_64h_80C", "P2_16h_20C", "P2_64h_20C", "P2_16h_5C", "P2_64h_5C", "P2_16h_22C", "P2_64h_22C", "S1_0h", "S1_16h_80C", "S1_64h_80C", "S1_16h_20C", "S1_64h_20C", "S1_16h_5C", "S1_64h_5C", "S1_16h_22C", "S1_64h_22C", "S2_0h", "S2_16h_80C", "S2_64h_80C", "S2_16h_20C", "S2_64h_20C", "S2_16h_5C", "S2_64h_5C", "S2_16h_22C", "S2_64h_22C") #HX
+#Order rows
+BCtableDisp <- BCtableDisp[match(cnam, BCtableDisp$to),]
+#Make first column into rownames
+BCtableDisp <- data.frame(BCtableDisp[,-1], row.names=BCtableDisp[,1])
+#Order columns
+BCtableDisp<-BCtableDisp[cnam]
+
+##Save table
+write.table(BCtableDisp, file="DisBCAllavgSpikedSE.txt", quote=F, sep="\t")
+```
+
+### 11 Dispersion relative to 0h, 0h is comparison within the replicates
+```{r}
+P10h<-BCtableDisp[c("P1_0h"),] %>% select(contains("P1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C")) 
+P20h<-BCtableDisp[c("P2_0h"),] %>% select(contains("P2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S10h<-BCtableDisp[c("S1_0h"),] %>% select(contains("S1")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+S20h<-BCtableDisp[c("S2_0h"),] %>% select(contains("S2")) %>% setNames(., c("0h", "16h_80C", "64h_80C", "16h_20C", "64h_20C", "16h_5C", "64h_5C", "16h_22C", "64h_22C"))
+
+Rel0h<-rbind(P10h, P20h, S10h, S20h)
+write.table(Rel0h, file="DisBCAllavgSpiked0hSE.txt", quote=F, sep="\t")
+Rel0ht<-t(Rel0h)
+write.table(Rel0ht, file="DisBCAllavgSpiked0hTransposedSE.txt", quote=F, sep="\t")
+```
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+

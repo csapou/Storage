@@ -1,0 +1,223 @@
+---
+title: "Rarecurves"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+## Introduction
+Creating rarefaction curves to evaluate if the genera detected are reaching a plateu indicating that samples have been sequenced at a level where only rare genera remains undetected. 
+
+### Packages 
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr"))
+library(rtk) #Rarefy data, calculate diversity and plot the results  
+```
+
+## Define variables used in the analysis
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- "All" #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. 
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+```
+
+
+
+## Analysis
+### 1 Read in data
+```{r}
+TaxRaw <- read.delim(file="TaxonomyRaw20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 2 Subsetting 
+```{r}
+#Removing negative and positive controls
+Metadata<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting metadata
+if (Subset=="Allspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubExp=="HX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata2<-filter(Metadata, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata2$Matching_samples)
+  Metadata<-filter(Metadata, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata2)
+} else if (SubExp=="HXFTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+TaxRaw<-select(TaxRaw, one_of(c(Metadata$Sample)))
+```
+
+
+### 3 rarefaction curves
+```{r}
+rare<-data.frame(t(TaxRaw))
+rare<-add_rownames(rare, "Sample")
+rare$colors<-ifelse(grepl("_P1", rare$Sample), "#30241E", ifelse(grepl("_P2", rare$Sample), "#B59B80", ifelse(grepl("_S1", rare$Sample), "#33a02c", ifelse(grepl("_S2", rare$Sample), "#B2DF8A", "pink"))))
+
+rarecurve(t(TaxRaw), step=10000, xlab="Sample size", ylab="Genera", col=rare$colors, label=FALSE)
+#Does not work  , legend(10000000, 4000, c("P1", "P2", "S1", "S2"), lty=c(1,1), lwd=c(2.5,2.5), col=rare$colors)
+
+pdf(paste("SF1Genus", "rarecurveAll.pdf", sep=""), height=6, width=8)
+rarecurve(t(TaxRaw), step=10000, xlab="Mapped reads", ylab="Genera", col=rare$colors, label=FALSE)
+dev.off()
+
+png(paste("SF1Genus", "rarecurveAll.png", sep=""), height=300, width=400)
+rarecurve(t(TaxRaw), step=10000, xlab="Mapped reads", ylab="Genera", col=rare$colors, label=FALSE)
+dev.off()
+
+
+#Can run to colour according to storage conditions when subsetting to P1, P2, S1, S2.
+#P1
+TaxRawP1<-select(TaxRaw, matches("_P1"))
+rare<-data.frame(t(TaxRawP1))
+rare<-add_rownames(rare, "Sample")
+#________________
+#Different colour stategies
+#Temp
+rare$colors<-ifelse(grepl("0h", rare$Sample), "#663300", ifelse(grepl("5C", rare$Sample), "#FF9900", ifelse(grepl("22C", rare$Sample), "#006600", ifelse(grepl("0C", rare$Sample), "#33FF33", "pink"))))
+#Spiked or unspiked
+rare$colors<-ifelse(grepl("MC", rare$Sample), "blue", "red")
+#________________
+#pdf(paste("Genus", "rarecurveP1.pdf", sep=""), height=6, width=12)
+rarecurve(t(TaxRawP1), step=50000, xlab="Sample size", ylab="Genus", col=rare$colors, label=FALSE)
+#dev.off()
+
+#Can run to colour according to storage conditions when subsetting to P1, P2, S1, S2.
+#P2
+TaxRawP2<-select(TaxRaw, matches("_P2"))
+rare<-data.frame(t(TaxRawP2))
+rare<-add_rownames(rare, "Sample")
+#________________
+#Different colour stategies
+#Temp
+rare$colors<-ifelse(grepl("0h", rare$Sample), "#663300", ifelse(grepl("5C", rare$Sample), "#FF9900", ifelse(grepl("22C", rare$Sample), "#006600", ifelse(grepl("0C", rare$Sample), "#33FF33", "pink"))))
+#Spiked or unspiked
+rare$colors<-ifelse(grepl("MC", rare$Sample), "blue", "red")
+#________________
+#pdf(paste("Genus", "rarecurveP2.pdf", sep=""), height=6, width=12)
+rarecurve(t(TaxRawP2), step=50000, xlab="Sample size", ylab="Genus", col=rare$colors, label=FALSE)
+#dev.off()
+
+#Can run to colour according to storage conditions when subsetting to P1, P2, S1, S2.
+#S1
+TaxRawS1<-select(TaxRaw, matches("_S1"))
+rare<-data.frame(t(TaxRawS1))
+rare<-add_rownames(rare, "Sample")
+#________________
+#Different colour stategies
+#Temp
+rare$colors<-ifelse(grepl("0h", rare$Sample), "#663300", ifelse(grepl("5C", rare$Sample), "#FF9900", ifelse(grepl("22C", rare$Sample), "#006600", ifelse(grepl("0C", rare$Sample), "#33FF33", "pink"))))
+#Spiked or unspiked
+rare$colors<-ifelse(grepl("MC", rare$Sample), "blue", "red")
+#________________
+#pdf(paste("Genus", "rarecurveS1.pdf", sep=""), height=6, width=12)
+rarecurve(t(TaxRawS1), step=50000, xlab="Sample size", ylab="Genus", col=rare$colors, label=FALSE)
+#dev.off()
+
+#Can run to colour according to storage conditions when subsetting to P1, P2, S1, S2.
+#S2
+TaxRawS2<-select(TaxRaw, matches("_S2"))
+rare<-data.frame(t(TaxRawS2))
+rare<-add_rownames(rare, "Sample")
+#________________
+#Different colour stategies
+#Temp
+rare$colors<-ifelse(grepl("0h", rare$Sample), "#663300", ifelse(grepl("5C", rare$Sample), "#FF9900", ifelse(grepl("22C", rare$Sample), "#006600", ifelse(grepl("0C", rare$Sample), "#33FF33", "pink"))))
+#Spiked or unspiked
+rare$colors<-ifelse(grepl("MC", rare$Sample), "blue", "red")
+#________________
+#pdf(paste("Genus", "rarecurveS2.pdf", sep=""), height=6, width=12)
+rarecurve(t(TaxRawS2), step=50000, xlab="Sample size", ylab="Genus", col=rare$colors, label=FALSE)
+#dev.off()
+```
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```

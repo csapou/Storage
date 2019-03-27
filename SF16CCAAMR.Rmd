@@ -1,0 +1,484 @@
+---
+title: "CCA AMR genes"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+Creating CCA plots with subsetting to sample level and if samples were spiked or unspiked.    
+Validation plots in the form of stressplots and screeplots are included.  
+Low abundant AMR classes are pooled into other
+
+### Packages
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2") 
+library(ggthemes) #This package contains extra themes, scales, and geoms, and functions for and related to ggplot2 eg. scale_colour_gdocs() help(package="ggthemes")
+library(plotly) #For making interactive web graphics. help(package="plotly") 
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(gridExtra)
+library(reshape2)
+library(tidyr)
+library(stringr)
+library(cowplot)
+```
+
+## Define variables
+Subset is a vector that is used to loop across the defined subsetting
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("P1spiked", "P1unspiked", "P2spiked", "P2unspiked", "S1spiked", "S1unspiked", "S2spiked", "S2unspiked")
+#c("P1spiked", "P1unspiked", "P2spiked", "P2unspiked", "S1spiked", "S1unspiked", "S2spiked", "S2unspiked") #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Filtering which organisms to include
+OrgFlt<-"All" #All, Bac, BacSacCry, BacArcVirSacCry 
+
+#Filtering of the count table. This is especially important to remove organisms after subsetting that are for instance not represented in pig feces 1 spiked ..., In the MAplot you can also see that the removed organisms are the low abundant ones that are already shrunk
+Filter_Rows<-1 #Is based on row sums so can take integer values 
+```
+
+## Analysis
+### 1 Read in data
+```{r}
+AMRRaw <- read.delim(file="AMRRaw20180919.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Feature <- read.delim(file="AMRClasses20180614.txt", sep="", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Feature$Description <- str_replace(Feature$Description,"-","")
+Feature$Description<-str_replace(Feature$Description, "Macrolide,","Macrolide")
+```
+
+### 2 Subsetting and creating CCAs stored in lists
+```{r}
+# Create a list to hold the plot objects.
+ScreeList <- list()
+StressList <- list()
+CCAList <- list()
+
+#Picking genes to colour in CCA, "Aminoglycoside", "Beta-lactam", "Macrolide", "Tetracycline", "Lincosamide", "Sulphonamide" 
+table(Feature$Description)
+#Also have to consider abundance
+
+for (i in Subset) {
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (i=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (i=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (i=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (i=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (i=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (i=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (i=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (i=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (i=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (i=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (i=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (i=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (i=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (i=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (i=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (i=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (i=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+AMRRaw2<-select(AMRRaw, one_of(Metadata2$Sample))
+
+#5.2 filtering
+#Filtering of the Counttable depending on rowSums. 
+AMRRaw2 <- AMRRaw2[rowSums(AMRRaw2)>Filter_Rows*length(AMRRaw2),]
+
+#Add title to plots
+if (i=="P1spiked") {
+  P<-"CCA pig feces 1 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="P1unspiked") {
+  P<-"CCA pig feces 1 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="P2spiked") {
+  P<-"CCA pig feces 2 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="P2unspiked") {
+  P<-"CCA pig feces 2 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S1spiked") {
+  P<-"CCA sewage 1 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S1unspiked") {
+  P<-"CCA sewage 1 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S2spiked") {
+  P<-"CCA sewage 2 spiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else if (i=="S2unspiked") {
+  P<-"CCA sewage 2 unspiked"
+  C<-"Screeplot"
+  S<-"Stressplot"
+} else {
+  print("Subset defined not valid")
+}
+
+#Feature is merged there the spiked in orgs will be removed as well
+
+#Norm of AMRRaw. Should be taken into account. The chi square distance that is the basis of cca makes raw counts appropriate. See https://sites.google.com/site/mb3gustame/reference/dissimilarity 
+
+#cca
+cca <- cca(t(AMRRaw2)~Replicate_Boxplot, Metadata2)
+
+#Screeplot 
+screeplot<-data.frame(cca$CCA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+#screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', i, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + ggtitle(C) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCCA", "Gene", i, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+#Create stressplot in ggplot source code: https://github.com/vegandevs/vegan/blob/master/R/stressplot.wcmdscale.R#L56, go to 'stressplot.cca'
+k<-2
+u <- cbind(cca$CCA$u, cca$CA$u)
+sev <- sqrt(c(cca$CCA$eig, cca$CA$eig))
+w <- sqrt(cca$rowsum)
+u <- diag(w) %*% u %*% diag(sev, length(sev))
+v <- cbind(cca$CCA$v, cca$CA$v)
+v <- diag(sqrt(cca$colsum)) %*% v
+## check that k <= rank
+if (k > length(sev)) {
+     warning(gettextf("max allowed rank is k = %d", length(sev)))
+     k <- min(k, length(sev))
+    }   
+## Distances
+Xbar <- u %*% t(v)
+Xbark <- u[,seq_len(k), drop = FALSE] %*% t(v[,seq_len(k), drop = FALSE])
+if (!is.null(cca$pCCA)) {
+    pFit <- ordiYbar(cca, "pCCA")
+    Xbar <- Xbar + pFit
+    Xbark <- Xbark + pFit
+}
+dis <- dist(Xbar)
+df <- melt(as.matrix(dis))
+odis <- dist(Xbark)
+df2 <- melt(as.matrix(odis))
+
+#Create plot name
+pltName <- paste( 'stress', i, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot() + 
+  geom_point(aes(df$value, df2$value)) +
+  ggtitle(paste(S)) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+
+#Extract scores from cca object
+scores <- vegan::scores(cca, display=c("sp", "wa", "cn", "bp"), choices=c(1,2,3))
+
+#Extract site information and add to metadata
+sites <- data.frame(scores$sites)
+sites$Sample <- rownames(sites)
+Metadata2 <- merge(Metadata2, sites, by="Sample")
+#Creating column in metadata for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+
+#Extract org information and add to Feature data
+species <- data.frame(scores$species)
+species$Gene <- rownames(species)
+Feature2 <- merge(Feature, species, by="Gene")
+#Create column org grouping for colouring 
+Feature2$col <- ifelse(Feature2$Description=="Aminoglycoside", "Aminoglycoside",
+          ifelse(Feature2$Description=="Betalactam", "Betalactam",
+          ifelse(Feature2$Description=="Macrolide", "Macrolide",
+          ifelse(Feature2$Description=="Tetracycline", "Tetracycline",
+          ifelse(Feature2$Description=="Lincosamide", "Lincosamide",
+          ifelse(Feature2$Description=="Sulphonamide", "Sulphonamide",
+                 "Other"))))))
+Feature2$col <- factor(Feature2$col, levels=c("Aminoglycoside", "Betalactam", "Macrolide", "Tetracycline", "Lincosamide", "Sulphonamide", "Other"))
+
+#Extract information on inertia 
+inertia <- cca$CCA$tot.chi/cca$tot.chi
+subheader <- paste("Inertia constrained by the explanatory variables", round(inertia, digits=2))
+#Extract information on eig
+eig1 <- (cca$CCA$eig[1]/(sum(cca$CCA$eig)+sum(cca$CA$eig)))*100
+eig_1 <- paste("CCA1", round(eig1, digits=2), "% of total variance")
+eig2 <- (cca$CCA$eig[2]/(sum(cca$CCA$eig)+sum(cca$CA$eig)))*100
+eig_2 <- paste("CCA2", round(eig2, digits=2), "% of total variance")
+
+#Change order in Replicate_Boxplot
+#Metadata2$Replicate_Boxplot<-ordered(Metadata2$Replicate_Boxplot, levels=c("0h", "16h-80C", "64h-80C", "16h-20C", "64h-20C", "16h5C", "64h5C", "16h22C", "64h22C"))
+#Change temperature and time to characters for plotting
+Metadata2$Time<-as.character(Metadata2$Time)
+
+#Example of how to make custom colors for the sample points changing both color and fill to represent the color schemes defined previously. 
+#This is for P1, there are small differences in the number of samples in each group you need to be aware of
+if (i=="P1spiked" || i=="P2spiked" || i=="P2unspiked" || i=="S1unspiked" || i=="S2spiked") {
+#Create plot name
+pltName <- paste('CCA', i, sep = '' )
+CCAList[[ pltName ]] <- ggplot() + 
+  geom_point(data=Metadata2[1:3,], aes(x=CCA1, y=CCA2, shape=Time), color="#999999", size=1.5, fill="#999999", stroke=1.2) + 
+  geom_point(data=Metadata2[4:6,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[7:9,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[10:12,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[13:15,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_point(data=Metadata2[16:18,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[19:21,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[22:24,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[25:27,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_line(data=Metadata2, aes(x=CCA1, y=CCA2, group=Replicate_Boxplot)) + 
+  geom_point(data=Feature2, aes(x=CCA1, y=CCA2, color=col, group=Gene), size=1) + 
+  scale_colour_gdocs() + 
+  labs(colour="Organisms", shape="Storage conditions", title=P, subtitle=subheader, x=eig_1, y=eig_2) + 
+  scale_shape_manual(values=c(21, 22, 23)) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none")
+} else if (i=="P1unspiked") {
+  #Create plot name
+pltName <- paste('CCA', i, sep = '' )
+CCAList[[ pltName ]] <- ggplot() + 
+  geom_point(data=Metadata2[1:3,], aes(x=CCA1, y=CCA2, shape=Time), color="#999999", size=1.5, fill="#999999", stroke=1.2) + 
+  geom_point(data=Metadata2[4:6,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[7:9,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[10:12,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[13:14,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_point(data=Metadata2[15:17,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[18:20,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[21:23,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[24:26,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_line(data=Metadata2, aes(x=CCA1, y=CCA2, group=Replicate_Boxplot)) + 
+  geom_point(data=Feature2, aes(x=CCA1, y=CCA2, color=col, group=Gene), size=1) + 
+  scale_colour_gdocs() + 
+  labs(colour="Organisms", shape="Storage conditions", title=P, subtitle=subheader, x=eig_1, y=eig_2) + 
+  scale_shape_manual(values=c(21, 22, 23)) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none")
+} else if (i=="S1spiked") {
+  #Create plot name
+pltName <- paste('CCA', i, sep = '' )
+CCAList[[ pltName ]] <- ggplot() + 
+  geom_point(data=Metadata2[1:3,], aes(x=CCA1, y=CCA2, shape=Time), color="#999999", size=1.5, fill="#999999", stroke=1.2) + 
+  geom_point(data=Metadata2[4:6,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[7:9,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[10:12,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[13:15,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_point(data=Metadata2[16:18,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[19:20,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[21:23,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[24:25,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_line(data=Metadata2, aes(x=CCA1, y=CCA2, group=Replicate_Boxplot)) + 
+  geom_point(data=Feature2, aes(x=CCA1, y=CCA2, color=col, group=Gene), size=1) + 
+  scale_colour_gdocs() + 
+  labs(colour="Organisms", shape="Storage conditions", title=P, subtitle=subheader, x=eig_1, y=eig_2) + 
+  scale_shape_manual(values=c(21, 22, 23)) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none")
+} else if (i=="S2unspiked") {
+  #Create plot name
+pltName <- paste('CCA', i, sep = '' )
+CCAList[[ pltName ]] <- ggplot() + 
+  geom_point(data=Metadata2[1:3,], aes(x=CCA1, y=CCA2, shape=Time), color="#999999", size=1.5, fill="#999999", stroke=1.2) + 
+  geom_point(data=Metadata2[4:5,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[6:8,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[9:11,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[12:14,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_point(data=Metadata2[15:17,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[18:20,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[21:23,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[24:26,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_line(data=Metadata2, aes(x=CCA1, y=CCA2, group=Replicate_Boxplot)) + 
+  geom_point(data=Feature2, aes(x=CCA1, y=CCA2, color=col, group=Gene), size=1) + 
+  scale_colour_gdocs() + 
+  labs(colour="Organisms", shape="Storage conditions", title=P, subtitle=subheader, x=eig_1, y=eig_2) + 
+  scale_shape_manual(values=c(21, 22, 23)) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none")
+  } else {
+  print("Error in i")
+}
+
+}
+```
+
+
+### 3 Create figures 
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,1,4,4,7,7,10,10),
+             c(1,1,4,4,7,7,10,10),
+             c(2,3,5,6,8,9,11,12),
+             c(13,13,16,16,19,19,22,22),
+             c(13,13,16,16,19,19,22,22),
+             c(14,15,17,18,20,21,23,24))
+pdf(paste("CCA", "GeneVal", ".pdf", sep=""), width=24, height=12)
+grid.arrange(CCAList$CCAP1spiked, ScreeList$screeP1spiked, StressList$stressP1spiked, CCAList$CCAP2spiked, ScreeList$screeP2spiked, StressList$stressP2spiked, CCAList$CCAS1spiked, ScreeList$screeS1spiked, StressList$stressS1spiked, CCAList$CCAS2spiked, ScreeList$screeS2spiked, StressList$stressS2spiked, CCAList$CCAP1unspiked, ScreeList$screeP1unspiked, StressList$stressP1unspiked, CCAList$CCAP2unspiked, ScreeList$screeP2unspiked, StressList$stressP2unspiked, CCAList$CCAS1unspiked, ScreeList$screeS1unspiked, StressList$stressS1unspiked, CCAList$CCAS2unspiked, ScreeList$screeS2unspiked, StressList$stressS2unspiked, layout_matrix = lay)
+dev.off()
+
+#Alternative lay
+lay <- rbind(c(1,1,13,13),
+             c(1,1,13,13),
+             c(2,3,14,15),
+             c(4,4,16,16),
+             c(4,4,16,16),
+             c(5,6,17,18),
+             c(7,7,19,19),
+             c(7,7,19,19),
+             c(8,9,20,21),
+             c(10,10,22,22),
+             c(10,10,22,22),
+             c(11,12,23,24))
+pdf(paste("SF16CCA", "GeneValTall", ".pdf", sep=""), width=12, height=20)
+grid.arrange(CCAList$CCAP1unspiked, ScreeList$screeP1unspiked, StressList$stressP1unspiked, CCAList$CCAP2unspiked, ScreeList$screeP2unspiked, StressList$stressP2unspiked, CCAList$CCAS1unspiked, ScreeList$screeS1unspiked, StressList$stressS1unspiked, CCAList$CCAS2unspiked, ScreeList$screeS2unspiked, StressList$stressS2unspiked, CCAList$CCAP1spiked, ScreeList$screeP1spiked, StressList$stressP1spiked, CCAList$CCAP2spiked, ScreeList$screeP2spiked, StressList$stressP2spiked, CCAList$CCAS1spiked, ScreeList$screeS1spiked, StressList$stressS1spiked, CCAList$CCAS2spiked, ScreeList$screeS2spiked, StressList$stressS2spiked, layout_matrix = lay)
+dev.off()
+
+lay <- rbind(c(1,2,3,4),
+             c(5,6,7,8))
+pdf(paste("CCA", "Gene", ".pdf", sep=""), width=24, height=12)
+grid.arrange(CCAList$CCAP1spiked, CCAList$CCAP2spiked, CCAList$CCAS1spiked, CCAList$CCAS2spiked, CCAList$CCAP1unspiked, CCAList$CCAP2unspiked, CCAList$CCAS1unspiked, CCAList$CCAS2unspiked, layout_matrix = lay)
+dev.off()
+
+lay <- rbind(c(1,2),
+             c(3,4))
+pdf(paste("CCAPigfeces", "Gene", ".pdf", sep=""), width=24, height=12)
+grid.arrange(CCAList$CCAP1spiked, CCAList$CCAP2spiked, CCAList$CCAP1unspiked, CCAList$CCAP2unspiked, layout_matrix = lay)
+dev.off()
+
+pdf(paste("CCASewage", "Gene", ".pdf", sep=""), width=24, height=12)
+grid.arrange(CCAList$CCAS1spiked, CCAList$CCAS2spiked, CCAList$CCAS1unspiked, CCAList$CCAS2unspiked, layout_matrix = lay)
+dev.off()
+
+#Legend plot
+legend<-ggplot() + 
+  geom_point(data=Metadata2[1:3,], aes(x=CCA1, y=CCA2, shape=Time), color="#999999", size=1.5, fill="#999999", stroke=1.2) + 
+  geom_point(data=Metadata2[4:6,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[7:9,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[10:12,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[13:15,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_point(data=Metadata2[16:18,], aes(x=CCA1, y=CCA2, shape=Time), color="#0571b0", size=1.5, fill="#0571b0", stroke=1.2) + 
+  geom_point(data=Metadata2[19:21,], aes(x=CCA1, y=CCA2, shape=Time), color="#92c5de", size=1.5, fill="#92c5de", stroke=1.2) + 
+  geom_point(data=Metadata2[22:24,], aes(x=CCA1, y=CCA2, shape=Time), color="#f4a582", size=1.5, fill="#f4a582", stroke=1.2) + 
+  geom_point(data=Metadata2[25:27,], aes(x=CCA1, y=CCA2, shape=Time), color="#ca0020", size=1.5, fill="#ca0020", stroke=1.2) + 
+  geom_line(data=Metadata2, aes(x=CCA1, y=CCA2, group=Replicate_Boxplot)) + 
+  geom_point(data=Feature2, aes(x=CCA1, y=CCA2, color=col, group=Gene), size=1) + 
+  scale_colour_gdocs() + 
+  labs(colour="Organisms", shape="Storage conditions", title=paste("CCA ", i), subtitle=subheader, x=eig_1, y=eig_2) + 
+  scale_shape_manual(values=c(21, 22, 23)) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="bottom")
+legendplot<-get_legend(legend)
+pdf(paste("LegendCCA", "AMR", ".pdf", sep=""), width=17, height=12)
+grid.arrange(legendplot)
+dev.off()
+```
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+
+
+
+
+
+
+`
+

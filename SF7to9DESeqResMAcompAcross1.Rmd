@@ -1,0 +1,419 @@
+---
+title: "DESeq results for creating MA plots and comparing across 1"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+The purpose of the following code is to create DESeq results that are compatible with "SF7to10DESeqResMAcompAcross2.Rmd".  
+In the script MA plots are saved in a list and tables containing DESeq results.  
+Have to change Submor for specific desired comparison and the Titleling 
+Other variables that can be changed include Test_Factor and Filter_Rows
+
+### Packages
+```{r}
+library(DESeq2) #Differential analysis of count data. help(package="DESeq2")
+library(knitr) #A general-purpose package for dynamic report generation in R. help(package="knitr")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(pheatmap) # Implementation of heatmaps that offers more control over dimensions and appearance help(package="pheatmap")
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(plotly) #For making interactive web graphics. help(package="plotly") 
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(ggthemes) #This package contains extra themes, scales, and geoms, and functions for and related to ggplot2 eg. scale_colour_gdocs() help(package="ggthemes")
+```
+
+## Define variables
+Remember to change Submor according to desired analysis
+```{r}
+#Define normalization strategy 
+##DESeq uses raw counts but I supply costum size factors
+
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<-c("P1spiked", "P1unspiked", "P2spiked", "P2unspiked", "S1spiked", "S1unspiked", "S2spiked", "S2unspiked")
+#c("P1spiked", "P1unspiked", "P2spiked", "P2unspiked", "S1spiked", "S1unspiked", "S2spiked", "S2unspiked")
+#All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Subset time temp dependant
+SubMor<-"0hvs-80C64h" #0hvs22C64h, 0hvs22C16h, 0hvs5C64h, 0hvs5C16h, 0hvsfrozen, 0hvs-20C64h, 0hvs-80C64h, 0hvs-20C16h, 0hvs-80C16h, All
+
+#Create title depending on Submor
+if (SubMor=="0hvs-80C64h") {
+  Titleling<-"-80°C for 64h"
+} else if (SubMor=="0hvs22C64h") {
+  Titleling<-"22°C for 64h"
+} else if (SubMor=="0hvs22C16h") {
+  Titleling<-"22°C for 16h"
+} else if (SubMor=="0hvs5C64h") {
+  Titleling<-"5°C for 64h"
+} else if (SubMor=="0hvs5C16h") {
+  Titleling<-"5°C for 16h"
+} else if (SubMor=="0hvsfrozen") {
+  Titleling<-"frozen"
+} else if (SubMor=="0hvs-20C64h") {
+  Titleling<-"-20°C for 64h"
+} else if (SubMor=="0hvs-20C16h") {
+  Titleling<-"-20°C for 16h"
+} else if (SubMor=="0hvs-80C16h") {
+  Titleling<-"-80°C for 16h"
+} else if (SubMor=="All") {
+  Titleling<-"All"
+} else {
+  print("SubMor defined not valid")
+}
+
+Titleling <- "-80°C for 64h"
+
+#Which factor to test can pick metadata columns 
+Test_Factor <- "Replicate_Boxplot" #FrozenUnfrozenSimple, Replicate_Groups, as.factor(Time)+StoragePlacementType, as.factor(Time)+StoragePlacementType+as.factor(Freeze_thaw_cycles), ...
+
+#Filtering of the count table. This is especially important to remove organisms after subsetting that are for instance not represented in pig feces 1 spiked ..., In the MAplot you can also see that the removed organisms are the low abundant ones that are already shrunk
+Filter_Rows<-10 #Is based on row sums so can take integer values 
+
+#Vegdist dissimilarity method. For sample clustering
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+
+#Decostand standardization method. For sample clustering
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log
+
+#The organisms clustering
+OrgCluster<-"correlation" #correlation, euclidean, maximum, manhattan, canberra, binary, minkowski 
+
+#Threshold for FDR-adjusted p-values
+padj_threshold <- 0.01  
+```
+
+### Coloring scheme
+```{r}
+#Define coloring schemes
+#Storagecol<-c("Direct" = "#999999", "-80" = "#0571b0", "-20" = "#92c5de", "5" = "#f4a582", "22" = "#ca0020")
+#Experimentcol<-c("Pig_feces_1" = "#30241E", "Pig_feces_2" = "#B59B80", "Sewage_1" = "#33a02c", "Sewage_2" = "#B2DF8A")
+Orgcol<-c("Proteobacteria" = "#3366CC", "Bacteroidetes" = "#DC3912", "Actinobacteria" = "#FF9900", "Firmicutes" = "#109618", "Firmicutes(Negativicutes)" = "#990099", "Eukaryota" = "#0099C6", "Archaea" = "#DD4477", "Viruses" = "#66AA00", "Other" = "#B82E2E")
+
+##How organisms were decided
+#show_col(gdocs_pal()(9))
+#gdocs_pal()(9) #to get the colors
+#library(RColorBrewer)
+#palette(brewer.pal(n=9, name="Set1")) 
+#brewer.pal(n=9, name="Set1") #to get the colors overlaps with other specified colors
+
+##How to specify one coloring scheme in ggplots using above
+#scale_color_manual(values=Experimentcol) + 
+##How to specify multiple colors in ggplots using above 
+#scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+```
+
+## Analysis
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="TaxonomyRaw20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Feature <- read.delim(file="FeatureShort20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+
+### 2 Subsetting, DESeq and visualization 
+Additional plots are created 
+Using for loop to go through Subset vector
+```{r}
+MAList <- list()
+
+
+for (i in Subset) {
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (i=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (i=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (i=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (i=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (i=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (i=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (i=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (i=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (i=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (i=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (i=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (i=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (i=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (i=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (i=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (i=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (i=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (i=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (i=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (i=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (i=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+
+#Further subsetting metadata
+if (SubMor=="0hvs22C64h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "64h22C")
+} else if (SubMor=="0hvs22C16h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "16h22C")
+} else if (SubMor=="0hvs5C64h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "64h5C")
+} else if (SubMor=="0hvs5C16h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "16h5C")
+} else if (SubMor=="0hvsfrozen") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "16h-20C"| Replicate_Boxplot == "64h-20C"| Replicate_Boxplot == "16h-80C"| Replicate_Boxplot == "64h-80C")
+} else if (SubMor=="0hvs-20C64h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "64h-20C")
+} else if (SubMor=="0hvs-80C64h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "64h-80C")
+} else if (SubMor=="0hvs-20C16h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "16h-20C")
+} else if (SubMor=="0hvs-80C16h") {
+  Metadata2<-filter(Metadata2, Replicate_Boxplot == "0h" | Replicate_Boxplot == "16h-80C")
+} else if (SubMor=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+
+#Change Time to be a factor
+#Metadata$Time<-as.factor(Metadata$Time)
+
+###5.1 Setup DESeq2
+######coldata is the metadata containing the columns batch and condition
+######In design put the variable of interest at the end of the formula and make sure the control level is the first level
+
+Metadata2$Replicate_Boxplot <- factor(Metadata2$Replicate_Boxplot, levels=c("0h", "16h22C", "64h22C", "16h5C", "64h5C", "16h-20C", "64h-20C", "16h-80C", "64h-80C"))
+
+#Create design formula
+design <- formula(paste("~ ", Test_Factor))
+
+#Create DESeq2 object with matrix and metadata
+dds <- DESeqDataSetFromMatrix(countData = Tax2,
+                              colData = Metadata2,
+                              design = design)
+
+##See vignette for note on factor levels
+
+#Filtering of the Counttable. Bare minimum is performed later. Also to reduce memory of the dds
+dds <- dds[ rowSums(counts(dds))>Filter_Rows*length(Tax2),]
+
+##Used when comparing the DESeq estimated size factors with Mapped parsed reads. 
+#dds<-estimateSizeFactors(dds)
+#DESeqSizeFactors<-sizeFactors(dds)
+#SizeFactors<-as.data.frame(DESeqSizeFactors)
+
+#Provide custom size factors
+dds<-estimateSizeFactors(dds)
+dds@colData@listData$sizeFactor
+dds@colData@listData$sizeFactor <- colSums(Tax2)/mean(colSums(Tax2))
+dds@colData@listData$sizeFactor
+
+#Estimate dispersions and fit the GLM
+dds <- DESeq(dds)
+
+
+
+
+
+
+#https://bioconductor.org/packages/3.7/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#ma-plot
+
+res<-results(dds)
+summary(res)
+resultsNames(dds)
+
+
+#MA plots from inbuild DESeq function
+plotMA(dds, alpha=0.1)
+plotMA(res, ylim=c(-2,2))
+
+#Data structuring
+df <- as.data.frame(res)
+df <- add_rownames(df, "Genus")
+df <- merge(Feature, df, by="Genus") #Removes orgs that are not present in these samples
+#Create column org grouping for colouring 
+df$col <- ifelse(df$Phylum=="Firmicutes", "Firmicutes",
+          ifelse(df$Phylum=="Proteobacteria", "Proteobacteria",
+          ifelse(df$Phylum=="Actinobacteria", "Actinobacteria",
+          ifelse(df$Phylum=="Bacteroidetes", "Bacteroidetes",
+          ifelse(df$Domain=="Eukaryota", "Eukaryota",
+          ifelse(df$Domain=="Viruses", "Viruses",
+          ifelse(df$Domain=="Archaea", "Archaea",
+                 "Other")))))))
+df$col[df$Class=="Negativicutes"] <- "Firmicutes(Negativicutes)"
+df$col <- factor(df$col, levels=c("Proteobacteria", "Bacteroidetes", "Actinobacteria", "Firmicutes", "Firmicutes(Negativicutes)", "Eukaryota", "Archaea", "Viruses", "Other"))
+#Create column for sig level used for shape
+df$shape <- ifelse(df$pvalue>0.1, "Not significant P>0.1",
+            ifelse(df$pvalue<0.01, "Significant P<0.01",
+                 "Borderline 0.1>P>0.01"))
+df$shape <- factor(df$shape, levels=c("Not significant P>0.1", "Borderline 0.1>P>0.01", "Significant P<0.01"))
+
+##Remove Cardiovirus in P2 0hvs5C64h & S1 0hvs22C64h
+#df <- filter(df, Genus!="Cardiovirus")
+##Remove Kurthia in P1 0hvs22C64h
+#df <- filter(df, Genus!="Kurthia")
+
+#Make MA plots ggplot
+#Be aware that levels of variables change so what becomes positive/negative log2fold changes not anymore
+pdf(paste("MAplot", "Genus", i, Test_Factor, Filter_Rows, ".pdf", sep=""), height=6, width=12)  
+print(ggplot(df) + 
+        geom_point(aes(x=baseMean, y=log2FoldChange, color=col, shape=shape, group=Genus), size=1) + 
+        scale_x_log10() + 
+        scale_color_manual(values=Orgcol) + 
+        labs(title=paste("MA-plot", i, sep=" "), subtitle=paste("Positive log2 fold change indicate higher relative abundance in sample stored at", Titleling, "compared to immediate DNA-extraction")) + 
+        theme_bw() + 
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())) #+ coord_cartesian(ylim=c(-5, 5)) #Can add to limit plotting boundaries + coord_cartesian(ylim=c(-5.5, 5)) #Remember levels of StoragePlacementType Nothing, Fridge, Table, Freezer, FreezerDeep. This is important for the specific comparison and what a positive log2foldchange represents. 
+dev.off()
+
+
+dfin <- filter(df, -2.5<log2FoldChange & log2FoldChange<2.5)
+dfout <- filter(df, -2.5>log2FoldChange | 2.5<log2FoldChange)
+dfout$log2FoldChange[dfout$log2FoldChange > 2.5] <- 2.5
+dfout$log2FoldChange[dfout$log2FoldChange < (-2.5)] <- -2.5
+pltName <- paste('MA', i, sep = '' )
+MAList[[ pltName ]] <- ggplot() + 
+  geom_point(data=dfin, aes(x=baseMean, y=log2FoldChange, color=col, group=Genus), size=1) + 
+  geom_point(data=dfout, aes(x=baseMean, y=log2FoldChange, color=col, group=Genus), shape=17, size=1) + 
+  scale_x_log10() + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title=paste("MA-plot", i, sep=" ")) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none") +
+  coord_cartesian(ylim=c(-2.5, 2.5)) +
+  geom_hline(yintercept = 0)
+#+ coord_cartesian(ylim=c(-5, 5)) #Can add to limit plotting boundaries + coord_cartesian(ylim=c(-5.5, 5)) #Remember levels of StoragePlacementType Nothing, Fridge, Table, Freezer, FreezerDeep. This is important for the specific comparison and what a positive log2foldchange represents.
+
+ggplotly(ggplot(df) + geom_point(aes(x=baseMean, y=log2FoldChange, color=col, group=Genus)) + scale_x_log10() + scale_colour_gdocs() + labs(title="MA-plot", subtitle=paste("Positive log2 fold change indicate higher relative abundance in sample stored at", Titleling, "compared to immediate DNA-extraction")) + geom_hline(yintercept = 0))
+
+#Unshrunken/shrunken 
+#res<-results(dds, addMLE=TRUE)
+#resLFC <- DESeq2::lfcShrink(dds, coef=2)
+#resLFC
+#DESeq2::plotMA(resLFC, ylim=c(-2,2))
+
+#Make histogram
+pdf(paste("Hist", "Genus", i, Test_Factor, Filter_Rows, ".pdf", sep=""), height=6, width=12) 
+hist(res$pvalue[res$baseMean > 1], breaks = 0:20/20,
+     col = "grey50", border = "white")
+dev.off()
+
+#Show dispersion plot with shrinkage
+pdf(paste("Dispersion_plot", Filter_Rows, "Genus", i, ".pdf", sep=""), height=9, width=12)
+plotDispEsts(dds)
+dev.off()
+
+#Plot PCA
+dds_rlog<-rlogTransformation(dds)
+pdf(paste("PCA_Filter", Filter_Rows, "Genus", i, ".pdf", sep=""), height=9, width=9)
+print(plotPCA(dds_rlog, intgroup=c("Replicate_Boxplot", "SpikedUnspiked"))+coord_fixed())
+dev.off()
+
+#Plot heatmap in the order of most variable organisms (n=30)
+select=order(rowMeans(assay(dds_rlog)), decreasing=TRUE)[1:30]
+#Plot heatmap with new clustering of Samples
+distmatrix_Species <- vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+pheatmap( assay(dds_rlog)[select, ], 
+          scale="row",
+          annotation_col=as.data.frame(
+            colData(dds_rlog)[, c("Replicate_Boxplot", "FrozenUnfrozenSimple")]), show_colnames = FALSE,
+          clustering_distance_cols = distmatrix_Species,
+          clustering_distance_rows = OrgCluster,
+          filename=paste("Heatmap_Filter", Filter_Rows, "Genus", i, ".pdf", sep=""))
+
+#Save table. 
+write.table(df, file=paste("ResultsTable", "Genus", i, Test_Factor, Filter_Rows, ".txt", sep=""), sep="\t", dec=",", row.names = F, quote = F)
+}
+```
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```

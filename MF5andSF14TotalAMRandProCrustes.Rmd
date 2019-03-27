@@ -1,0 +1,523 @@
+---
+title: "Boxplots total AMR and procrustes rotation comparing AMR with Tax"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+Creating figure 5 containing bloxplots of total AMR and procrustes rotation comparing AMR patterns with taxonomic patterns in unspiked. SF14 the same as Fig. 5 but spiked samples  
+
+### Packages
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(stringr) #Simple, consistent wrappers for common string operations. Like the str_replace function. help(package="stringr")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(gridExtra)
+library(grid)
+library(lattice)
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(reshape2)
+library(tidyr)
+```
+
+## Analysis Total AMR
+### 1 Read in data
+```{r}
+AMRFPKM <- read.delim(file="AMRFPKMBac20180919.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+
+### 2 Subsetting and create list with boxplots unspiked
+```{r}
+###1 Define variables
+######Define variables used in the analysis
+
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<-c("P1unspiked", "P2unspiked", "S1unspiked", "S2unspiked") #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+
+BoxplotListTotal <- list()
+
+for (i in Subset) {
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting metadata
+if (i=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (i=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (i=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (i=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (i=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (i=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (i=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (i=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (i=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (i=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (i=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (i=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (i=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (i=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (i=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (i=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (i=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+AMRFPKM2<-select(AMRFPKM, one_of(Metadata2$Sample))
+
+
+###Wanted to plot total AMR per sample
+Metadata2$TotalAMR<-colSums(AMRFPKM2)
+
+#Change order on x-axis
+Metadata2$Replicate_Boxplot<-as.factor(Metadata2$Replicate_Boxplot)
+levels(Metadata2$Replicate_Boxplot)
+Metadata2$Replicate_Boxplot<-ordered(Metadata2$Replicate_Boxplot, levels=c("0h", "16h-80C", "64h-80C", "16h-20C", "64h-20C", "16h5C", "64h5C", "16h22C", "64h22C"))
+
+#Reads_Total, Reads_AfterTrim, Mapped, PercentUnmapped. Change 3 places
+BoxplotListTotal[[i]] <- ggplot(Metadata2, aes_string(x="Replicate_Boxplot", y="TotalAMR", group="Replicate_Boxplot")) +
+  geom_boxplot(aes(fill=Replicate_Boxplot)) + 
+  facet_grid(SpikedUnspiked ~ Sample_type_new, scales="free") + 
+  #ggtitle(paste("Genus", i, SubExp, sep=" ")) + 
+  #xlab("Storage conditions") + 
+  ylab("Total AMR per Sample [FPKM]") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none", strip.text.y = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()) + 
+  scale_fill_manual(values=c("#999999", "#0571b0", "#0571b0", "#92c5de", "#92c5de", "#f4a582", "#f4a582", "#ca0020", "#ca0020")) #+ 
+  #scale_y_continuous(breaks = seq(20, 100, by = 5))
+}
+
+#Have the plots stored in lists
+lay <- rbind(c(1,2,3,4))
+pdf(paste("TotalAMRunspiked.pdf", sep=""), width=8.5, height=2.5)
+grid.arrange(BoxplotListTotal$P1unspiked, BoxplotListTotal$P2unspiked, BoxplotListTotal$S1unspiked, BoxplotListTotal$S2unspiked, layout_matrix = lay)  
+dev.off() 
+```
+
+### 3 Subsetting and create list with boxplots spiked
+```{r}
+###1 Define variables
+######Define variables used in the analysis
+
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<-c("P1spiked", "P2spiked", "S1spiked", "S2spiked") #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+for (i in Subset) {
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting metadata
+if (i=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (i=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (i=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (i=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (i=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (i=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (i=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (i=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (i=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (i=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (i=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (i=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (i=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (i=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (i=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (i=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (i=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+AMRFPKM2<-select(AMRFPKM, one_of(Metadata2$Sample))
+
+
+###Wanted to plot total AMR per sample
+Metadata2$TotalAMR<-colSums(AMRFPKM2)
+
+#Change order on x-axis
+Metadata2$Replicate_Boxplot<-as.factor(Metadata2$Replicate_Boxplot)
+levels(Metadata2$Replicate_Boxplot)
+Metadata2$Replicate_Boxplot<-ordered(Metadata2$Replicate_Boxplot, levels=c("0h", "16h-80C", "64h-80C", "16h-20C", "64h-20C", "16h5C", "64h5C", "16h22C", "64h22C"))
+
+#Reads_Total, Reads_AfterTrim, Mapped, PercentUnmapped. Change 3 places
+BoxplotListTotal[[i]] <- ggplot(Metadata2, aes_string(x="Replicate_Boxplot", y="TotalAMR", group="Replicate_Boxplot")) +
+  geom_boxplot(aes(fill=Replicate_Boxplot)) + 
+  facet_grid(SpikedUnspiked ~ Sample_type_new, scales="free") + 
+  #ggtitle(paste("Genus", i, SubExp, sep=" ")) + 
+  #xlab("Storage conditions") + 
+  ylab("Total AMR per Sample [FPKM]") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none", strip.text.y = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()) + 
+  scale_fill_manual(values=c("#999999", "#0571b0", "#0571b0", "#92c5de", "#92c5de", "#f4a582", "#f4a582", "#ca0020", "#ca0020")) #+ 
+  #scale_y_continuous(breaks = seq(20, 100, by = 5))
+}
+
+#Have the plots stored in lists
+lay <- rbind(c(1,2,3,4))
+pdf(paste("TotalAMRspiked.pdf", sep=""), width=8.5, height=2.5)
+grid.arrange(BoxplotListTotal$P1spiked, BoxplotListTotal$P2spiked, BoxplotListTotal$S1spiked, BoxplotListTotal$S2spiked, layout_matrix = lay)  
+dev.off() 
+```
+
+## Analysis Total AMR
+### 1 Read in additional data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 2 Subsetting and create list with procrustes plots
+```{r}
+#Define variables used in the analysis 
+Subset<- c("P1spiked", "P1unspiked", "P2spiked", "P2unspiked", "S1spiked", "S1unspiked", "S2spiked", "S2unspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Filtering which organisms to include
+OrgFlt<-"All" #All, Bac, BacSacCry, BacArcVirSacCry 
+
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log, DESeqTrans
+
+#Vegdist dissimilarity method
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+
+#Define coloring schemes
+Storagecol<-c("Direct" = "#999999", "-80" = "#0571b0", "-20" = "#92c5de", "5" = "#f4a582", "22" = "#ca0020")
+Experimentcol<-c("Pig_feces_1" = "#663300", "Pig_feces_2" = "#FF9900", "Sewage_1" = "#006600", "Sewage_2" = "#33FF33")
+
+## Create a list to hold the plot objects.
+ProcrustesList <- list()
+#ProerrorsList <- list()
+
+
+for (i in Subset) {
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (i=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (i=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (i=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (i=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (i=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (i=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (i=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (i=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (i=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (i=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (i=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (i=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (i=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (i=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (i=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (i=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (i=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (i=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (i=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (i=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (i=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+AMRFPKM2<-select(AMRFPKM, one_of(Metadata2$Sample))
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#Make protest
+prot<-protest(cmdscale(vegdist(decostand(t(Tax2), method="hellinger"), method="bray")), cmdscale(vegdist(decostand(t(AMRFPKM2), method="hellinger"), method="bray")))
+prot
+#summary(prot)
+plot(prot)
+plot(prot, kind=2)
+
+Title <- paste("Procrustes", i)
+Subtitle <- paste("Correlation = ", round(prot$t0, digits = 4), " (SS = ", round(prot$ss, digits = 4), "), p-value = ", round(prot$signif, digits = 4), sep="") 
+
+#Extract procrustes info
+plot <- data.frame(xcap1=prot$Yrot[,1], ycap1=prot$Yrot[,2], xcap2=prot$X[,1], ycap2=prot$X[,2])
+
+#Add row names to df
+plot$Sample <- row.names(plot)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, plot, by="Sample")
+
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Direct"
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Direct", "-80", "-20", "5", "22"))
+
+#Create plot name
+pltName <- paste("Prot", i, sep="")
+#create procrustes ggplot
+ProcrustesList[[ pltName ]]<-ggplot(Metadata2) +
+geom_point(aes(x=xcap1, y=ycap1, color=Temperature, shape = Time)) +
+geom_point(aes(x=xcap2, y=ycap2, color=Temperature, shape = Time)) +
+geom_segment(aes(x=xcap1, y=ycap1, xend=xcap2, yend=ycap2, color=Temperature), arrow=arrow(length=unit(0.2,"cm"))) +
+scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+labs(colour="Temperature / °C", shape="Time / h", x = "Dimension 1", y = "Dimension 2", title = Title, subtitle = Subtitle) + 
+theme_bw() + 
+theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none")  
+}
+
+#Have the plots stored in lists
+lay <- rbind(c(1,2,3,4),
+             c(5,6,7,8))
+pdf(paste("ProcrustesTAXvsAMR", ".pdf", sep=""), width=24, height=12)
+grid.arrange(ProcrustesList$ProtP1spiked, ProcrustesList$ProtP2spiked, ProcrustesList$ProtS1spiked, ProcrustesList$ProtS2spiked, ProcrustesList$ProtP1unspiked, ProcrustesList$ProtP2unspiked, ProcrustesList$ProtS1unspiked, ProcrustesList$ProtS2unspiked, layout_matrix = lay)
+dev.off()
+
+#ProcrustesList$ProtP1spiked
+
+lay <- rbind(c(1,5),
+             c(2,6),
+             c(3,7),
+             c(4,8))
+pdf(paste("ProcrustesTAXvsAMRTall", ".pdf", sep=""), width=8.5, height=11.75)
+grid.arrange(ProcrustesList$ProtP1spiked, ProcrustesList$ProtP2spiked, ProcrustesList$ProtS1spiked, ProcrustesList$ProtS2spiked, ProcrustesList$ProtP1unspiked, ProcrustesList$ProtP2unspiked, ProcrustesList$ProtS1unspiked, ProcrustesList$ProtS2unspiked, layout_matrix = lay)
+dev.off()
+
+```
+
+## Create MF5 and SF14
+```{r}
+#MF5 unspiked
+lay <- rbind(c(1,2,3,4),
+             c(1,2,3,4),
+             c(5,5,6,6),
+             c(5,5,6,6),
+             c(5,5,6,6),
+             c(7,7,8,8),
+             c(7,7,8,8),
+             c(7,7,8,8))
+pdf(paste("MF5TotalAMRandProCrustes", ".pdf", sep=""), width=9, height=11.5)
+grid.arrange(BoxplotListTotal$P1unspiked, BoxplotListTotal$P2unspiked, BoxplotListTotal$S1unspiked, BoxplotListTotal$S2unspiked, ProcrustesList$ProtP1unspiked, ProcrustesList$ProtP2unspiked, ProcrustesList$ProtS1unspiked, ProcrustesList$ProtS2unspiked, layout_matrix = lay)
+dev.off()
+
+#SF14 spiked
+pdf(paste("SF14TotalAMRandProCrustes", ".pdf", sep=""), width=9, height=11.5)
+grid.arrange(BoxplotListTotal$P1spiked, BoxplotListTotal$P2spiked, BoxplotListTotal$S1spiked, BoxplotListTotal$S2spiked, ProcrustesList$ProtP1spiked, ProcrustesList$ProtP2spiked, ProcrustesList$ProtS1spiked, ProcrustesList$ProtS2spiked, layout_matrix = lay)
+dev.off()
+```
+
+
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+

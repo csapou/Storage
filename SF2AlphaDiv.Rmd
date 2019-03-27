@@ -1,0 +1,383 @@
+
+---
+title: "Alpha-diversity"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+Calculating alpha diversity measures for pig feces and sewage.  
+Indices include: Shannon. Simpson, inverse Simpson, Fishers alpha, richness, rarefy_min_count, chao1, chao1SE, Shannon with rarefy, Simpson with rarefy, Inverse Simpson with rarefy, and Pielou's evenness.   
+
+### Packages
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(gridExtra)
+library(reshape2)
+library(tidyr)
+```
+
+## Define variables 
+Filter rows is in this case due to subsetting getting rows only containing zeroes 
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<-"All" #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All #Need to modify to run with other experiments than HX
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Filtering of the count table.
+Filter_Rows<-0 #Is based on row sums so can take integer values. Pick zero to remove not present genera relevant due to the subsetting 
+```
+
+
+## Analysis Pig feces
+### 1 Read in data
+```{r}
+TaxRaw <- read.delim(file="TaxonomyRaw20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+
+### 2 Subsetting 
+```{r}
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting metadata
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+TaxRaw2<-select(TaxRaw, one_of(Metadata2$Sample))
+
+#Change Time to be a factor
+#Metadata2$Time<-as.factor(Metadata2$Time)
+```
+
+
+### 3 Filtering
+```{r}
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#TaxRaw2$Orgs<-rownames(TaxRaw2)
+#TaxRaw2<-TaxRaw2[!TaxRaw2$Orgs %in% SpikedGenus, ]
+#TaxRaw2<-TaxRaw2[, 1:length(TaxRaw2)-1]
+
+#Filtering of the Counttable depending on rowSums. 
+TaxRaw2 <- TaxRaw2[rowSums(TaxRaw2)>Filter_Rows*length(TaxRaw2),]
+```
+
+
+
+### 4 Calculate alpha diversity and add to metadata
+```{r}
+#Use vegan to calculate various diversity and richness indexes for each sample
+diversityCalc <- data.frame(Shannon=diversity(t(TaxRaw2), index="shannon"), Simpson=diversity(t(TaxRaw2), index="simpson"), invSimpson=diversity(t(TaxRaw2), index="invsimpson"), fisher=fisher.alpha(t(TaxRaw2)), richness=specnumber(t(TaxRaw2)), rarefy_min_count=rarefy(t(TaxRaw2), sample=min(rowSums(t(TaxRaw2)))), chao1=estimateR(t(TaxRaw2))["S.chao1",], chao1SE=estimateR(t(TaxRaw2))["se.chao1",], ShannonRar=diversity(rrarefy(data.frame(t(TaxRaw2)), min(rowSums(t(TaxRaw2)))), index="shannon"), SimpsonRar=diversity(rrarefy(data.frame(t(TaxRaw2)), min(rowSums(t(TaxRaw2)))), index="simpson"), invSimpsonRar=diversity(rrarefy(data.frame(t(TaxRaw2)), min(rowSums(t(TaxRaw2)))), index="invsimpson"), Pielou=diversity(t(TaxRaw2))/log(specnumber(t(TaxRaw2))))
+
+diversityCalc<-add_rownames(diversityCalc, "Sample")
+
+Metadata2<-merge(Metadata2, diversityCalc, by="Sample")
+```
+
+
+### 5 Make boxplots
+```{r}
+##Select organisms
+AlphaDiv<-c("fisher", "Shannon", "Simpson", "invSimpson", "richness", "chao1", "ShannonRar", "SimpsonRar", "invSimpsonRar", "Pielou")
+Metadata2$Replicate_Boxplot<-as.factor(Metadata2$Replicate_Boxplot)
+#Change order on x-axis
+levels(Metadata2$Replicate_Boxplot)
+Metadata2$Replicate_Boxplot<-ordered(Metadata2$Replicate_Boxplot, levels=c("0h", "16h-80C", "64h-80C", "16h-20C", "64h-20C", "16h5C", "64h5C", "16h22C", "64h22C"))
+Metadata2$SpikedUnspiked<-ordered(Metadata2$SpikedUnspiked, levels=c("Unspiked", "Spiked"))
+
+# Create a list to hold the plot objects.
+AlphaList <- list()
+
+#Plot
+for (i in AlphaDiv) {
+#Create plot name
+pltName <- paste( 'PFAlpha', i, sep = '' )
+#create PCoA
+AlphaList[[ pltName ]]<- 
+ggplot(Metadata2, aes_string(x="Replicate_Boxplot", y=i, group="Replicate_Boxplot")) +
+    geom_boxplot(aes(fill=Replicate_Boxplot)) + 
+    facet_grid(SpikedUnspiked ~ Sample_type_new, scales="fixed") + #Scales should not be "free"
+    ggtitle(paste("Genus", Subset, SubExp, i, sep=" ")) + 
+    xlab("Storage conditions") + 
+    ylab("Index value") + 
+    scale_fill_manual(values=c("#999999", "#0571b0", "#0571b0", "#92c5de", "#92c5de", "#f4a582", "#f4a582", "#ca0020", "#ca0020")) + 
+    theme_bw() + 
+    theme(legend.position="none", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+mean(Metadata2$chao1)
+sd(Metadata2$chao1)
+
+fropilmean<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer") 
+mean(fropilmean$Pielou)
+sd(fropilmean$Pielou)
+
+Unfropilmean<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+mean(Unfropilmean$Pielou)
+sd(Unfropilmean$Pielou)
+```
+
+
+
+### 6 Sewage analysis
+Same analysis as pig feces. Using the same data
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<-"SW" #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting metadata
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+TaxRaw2<-select(TaxRaw, one_of(Metadata2$Sample))
+
+#Filtering of the Counttable depending on rowSums. 
+TaxRaw2 <- TaxRaw2[rowSums(TaxRaw2)>Filter_Rows*length(TaxRaw2),]
+
+
+#Calculate alpha diversity and add to metadata
+#Use vegan to calculate various diversity and richness indexes for each sample
+diversityCalc <- data.frame(Shannon=diversity(t(TaxRaw2), index="shannon"), Simpson=diversity(t(TaxRaw2), index="simpson"), invSimpson=diversity(t(TaxRaw2), index="invsimpson"), fisher=fisher.alpha(t(TaxRaw2)), richness=specnumber(t(TaxRaw2)), rarefy_min_count=rarefy(t(TaxRaw2), sample=min(rowSums(t(TaxRaw2)))), chao1=estimateR(t(TaxRaw2))["S.chao1",], chao1SE=estimateR(t(TaxRaw2))["se.chao1",], ShannonRar=diversity(rrarefy(data.frame(t(TaxRaw2)), min(rowSums(t(TaxRaw2)))), index="shannon"), SimpsonRar=diversity(rrarefy(data.frame(t(TaxRaw2)), min(rowSums(t(TaxRaw2)))), index="simpson"), invSimpsonRar=diversity(rrarefy(data.frame(t(TaxRaw2)), min(rowSums(t(TaxRaw2)))), index="invsimpson"), Pielou=diversity(t(TaxRaw2))/log(specnumber(t(TaxRaw2))))
+
+diversityCalc<-add_rownames(diversityCalc, "Sample")
+
+Metadata2<-merge(Metadata2, diversityCalc, by="Sample")
+
+#Make boxplots
+##Select organisms
+AlphaDiv<-c("fisher", "Shannon", "Simpson", "invSimpson", "richness", "chao1", "ShannonRar", "SimpsonRar", "invSimpsonRar", "Pielou")
+Metadata2$Replicate_Boxplot<-as.factor(Metadata2$Replicate_Boxplot)
+#Change order on x-axis
+levels(Metadata2$Replicate_Boxplot)
+Metadata2$Replicate_Boxplot<-ordered(Metadata2$Replicate_Boxplot, levels=c("0h", "16h-80C", "64h-80C", "16h-20C", "64h-20C", "16h5C", "64h5C", "16h22C", "64h22C"))
+Metadata2$SpikedUnspiked<-ordered(Metadata2$SpikedUnspiked, levels=c("Unspiked", "Spiked"))
+
+#Plot
+for (i in AlphaDiv) {
+#Create plot name
+pltName <- paste( 'SWAlpha', i, sep = '' )
+#create PCoA
+AlphaList[[ pltName ]]<- 
+ggplot(Metadata2, aes_string(x="Replicate_Boxplot", y=i, group="Replicate_Boxplot")) +
+    geom_boxplot(aes(fill=Replicate_Boxplot)) + 
+    facet_grid(SpikedUnspiked ~ Sample_type_new, scales="fixed") + #Scales should not be "free"
+    ggtitle(paste("Genus", Subset, SubExp, i, sep=" ")) + 
+    xlab("Storage conditions") + 
+    ylab("Index value") + 
+    scale_fill_manual(values=c("#999999", "#0571b0", "#0571b0", "#92c5de", "#92c5de", "#f4a582", "#f4a582", "#ca0020", "#ca0020")) + 
+    theme_bw() + 
+    theme(legend.position="none", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+mean(Metadata2$chao1)
+sd(Metadata2$chao1)
+
+```
+
+### 7 Create figure with selected indices 
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,2),
+             c(3,4),
+             c(5,6))
+pdf(paste("SF2Alpha", "Genus", ".pdf", sep=""), width=8, height=12)
+grid.arrange(AlphaList$PFAlphachao1, AlphaList$SWAlphachao1, AlphaList$PFAlphaPielou, AlphaList$SWAlphaPielou, AlphaList$PFAlphaSimpson, AlphaList$SWAlphaSimpson, layout_matrix = lay)
+dev.off()
+
+png(paste("SF2Alpha", "Genus", ".png", sep=""), width=600, height=900)
+grid.arrange(AlphaList$PFAlphachao1, AlphaList$SWAlphachao1, AlphaList$PFAlphaPielou, AlphaList$SWAlphaPielou, AlphaList$PFAlphaSimpson, AlphaList$SWAlphaSimpson, layout_matrix = lay)
+dev.off()
+```
+
+
+#_________________________________________________________________
+###### Session information
+```{r session_info}
+sessionInfo()
+
+```
+
+######This document was processed on: 
+```{r}
+Sys.Date()
+```
+
+
+
+

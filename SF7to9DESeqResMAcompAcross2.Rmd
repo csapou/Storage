@@ -1,0 +1,528 @@
+---
+title: "DESeq results for creating MA plots and comparing across 2"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+To run this you need to run "SF7to10DESeqResMAcompAcross1.Rmd" (don't clear environment before running). Transfer Resultstables generated in "SF7to10DESeqResMAcompAcross1.Rmd". Also need Featureshort in the same directory.  
+This is not sensitive to the variable SubMor and no variables needs to be defined.
+
+### Clear environment except MAList
+```{r}
+rm(list=setdiff(ls(), c("MAList", "Feature")))
+```
+
+### Packages
+```{r}
+library(reshape2) # Flexibly restructure and aggregate data using just two functions: melt and 'dcast' (or 'acast'). help(package="reshape2")
+library(gridExtra)
+library(grid)
+library(lattice)
+library(cowplot)
+```
+
+### Coloring scheme
+```{r}
+#Define coloring schemes
+#Storagecol<-c("Direct" = "#999999", "-80" = "#0571b0", "-20" = "#92c5de", "5" = "#f4a582", "22" = "#ca0020")
+#Experimentcol<-c("Pig_feces_1" = "#30241E", "Pig_feces_2" = "#B59B80", "Sewage_1" = "#33a02c", "Sewage_2" = "#B2DF8A")
+Orgcol<-c("Proteobacteria" = "#3366CC", "Bacteroidetes" = "#DC3912", "Actinobacteria" = "#FF9900", "Firmicutes" = "#109618", "Firmicutes(Negativicutes)" = "#990099", "Eukaryota" = "#0099C6", "Archaea" = "#DD4477", "Viruses" = "#66AA00", "Other" = "#B82E2E")
+
+##How organisms were decided
+#show_col(gdocs_pal()(9))
+#gdocs_pal()(9) #to get the colors
+#library(RColorBrewer)
+#palette(brewer.pal(n=9, name="Set1")) 
+#brewer.pal(n=9, name="Set1") #to get the colors overlaps with other specified colors
+
+##How to specify one coloring scheme in ggplots using above
+#scale_color_manual(values=Experimentcol) + 
+##How to specify multiple colors in ggplots using above 
+#scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+```
+
+## Analysis
+### 1 Read in data and create dataframes unspiked
+```{r}
+#Read in data
+P1 <- read.delim(file="ResultsTableGenusP1unspikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+#Add prefix to column names 
+colnames(P1)[7:14]<-paste("P1", colnames(P1)[7:14], sep="_")
+#Remove irrelevant taxonomy info
+P1 <- P1[,c(1, 7:14)]
+
+P2 <- read.delim(file="ResultsTableGenusP2unspikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+colnames(P2)[7:14]<-paste("P2", colnames(P2)[7:14], sep="_")
+P2 <- P2[,c(1, 7:14)]
+
+S1 <- read.delim(file="ResultsTableGenusS1unspikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+colnames(S1)[7:14]<-paste("S1", colnames(S1)[7:14], sep="_")
+S1 <- S1[,c(1, 7:14)]
+
+S2 <- read.delim(file="ResultsTableGenusS2unspikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+colnames(S2)[7:14]<-paste("S2", colnames(S2)[7:14], sep="_")
+S2 <- S2[,c(1, 7:14)]
+```
+
+### 2 Create Boxplots unspiked 
+Boxplots are comparing shared organisms in all unspiked samples 
+```{r}
+#Create df from orgs shared across all samples
+SharedOrgs<-merge(P1, merge(P2, merge(S1, S2, by="Genus"), by="Genus"), by="Genus")
+#Extract log2foldchanges
+dfall <- data.frame(select(SharedOrgs, matches("Genus|log2FoldChange")))
+#First column genus into rownames
+dfall <- data.frame(dfall[,-1], row.names=dfall[,1])
+#Transpose
+dfall <- data.frame(t(dfall))
+#Mean of sd 
+meanOrgs<-round(mean(apply(dfall, 2, sd)), digits=3)
+#Melt
+newdfall<-melt(dfall)
+#______
+#Change colnames
+colnames(newdfall) <- c("Genus", "value")
+#Add feature info to merge with newdfall
+#Feature <- read.delim(file="FeatureShort20180925.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+#Merge for plotting
+dfplotting <- merge(newdfall, Feature, by="Genus")
+#Create column org grouping for colouring 
+dfplotting$col <- ifelse(dfplotting$Phylum=="Firmicutes", "Firmicutes",
+          ifelse(dfplotting$Phylum=="Proteobacteria", "Proteobacteria",
+          ifelse(dfplotting$Phylum=="Actinobacteria", "Actinobacteria",
+          ifelse(dfplotting$Phylum=="Bacteroidetes", "Bacteroidetes",
+          ifelse(dfplotting$Domain=="Eukaryota", "Eukaryota",
+          ifelse(dfplotting$Domain=="Viruses", "Viruses",
+          ifelse(dfplotting$Domain=="Archaea", "Archaea",
+                 "Other")))))))
+dfplotting$col[dfplotting$Class=="Negativicutes"] <- "Firmicutes(Negativicutes)"
+dfplotting$col <- factor(dfplotting$col, levels=c("Proteobacteria", "Bacteroidetes", "Actinobacteria", "Firmicutes", "Firmicutes(Negativicutes)", "Eukaryota", "Archaea", "Viruses", "Other"))
+#_______
+#Make boxplots change order boxplots according to mean
+pdf("UnspikedAllreorder.pdf", height=6, width=12) 
+ggplot(dfplotting) + 
+  geom_boxplot(aes(x=reorder(Genus, value, mean), y=value, color=col)) + 
+  theme_bw() +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + 
+  geom_hline(yintercept=0) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Boxplots log2Foldchanges", subtitle=paste("P1unspiked, P2unspiked, S1unspiked, S2unspiked, mean sd ", meanOrgs, sep=""), x="Genera", y="log2Foldchange") 
+dev.off()
+#Add legend.position="none" to theme when have solution regarding 
+
+AllList <- list()
+AllList[[ "UnspikedComp0hwX" ]]<-ggplot(dfplotting) + 
+  geom_boxplot(aes(x=reorder(Genus, value, mean), y=value, color=col)) + 
+  theme_bw() +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none") + 
+  geom_hline(yintercept=0) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Boxplots log2Foldchanges", subtitle=paste("P1unspiked, P2unspiked, S1unspiked, S2unspiked, mean sd ", meanOrgs, sep=""), x="Genera", y="log2Foldchange") 
+```
+
+
+### 3 Create scatterplots pig feces unspiked
+Does not seem informative to make boxplots when there is only two measures instead made scatterplot of the two pig feces samples and two sewage samples seperately
+```{r}
+#Create df from orgs shared across all Pig fecal samples or Sewage
+SharedOrgs<-merge(P1, P2, by="Genus")
+#Extract log2foldchanges
+dfall <- data.frame(select(SharedOrgs, matches("Genus|log2FoldChange")))
+#______
+#Merge for plotting
+dfplotting <- merge(dfall, Feature, by="Genus")
+#Create column org grouping for colouring 
+dfplotting$col <- ifelse(dfplotting$Phylum=="Firmicutes", "Firmicutes",
+          ifelse(dfplotting$Phylum=="Proteobacteria", "Proteobacteria",
+          ifelse(dfplotting$Phylum=="Actinobacteria", "Actinobacteria",
+          ifelse(dfplotting$Phylum=="Bacteroidetes", "Bacteroidetes",
+          ifelse(dfplotting$Domain=="Eukaryota", "Eukaryota",
+          ifelse(dfplotting$Domain=="Viruses", "Viruses",
+          ifelse(dfplotting$Domain=="Archaea", "Archaea",
+                 "Other")))))))
+dfplotting$col[dfplotting$Class=="Negativicutes"] <- "Firmicutes(Negativicutes)"
+dfplotting$col <- factor(dfplotting$col, levels=c("Proteobacteria", "Bacteroidetes", "Actinobacteria", "Firmicutes", "Firmicutes(Negativicutes)", "Eukaryota", "Archaea", "Viruses", "Other"))
+
+#Linear model info
+modelP<-lm(P2_log2FoldChange ~ P1_log2FoldChange, dfplotting)
+#Model validation
+plot(modelP)
+#summary(modelP)
+intercept = format(coef(modelP)[1], digits = 2)
+slope = format(coef(modelP)[2], digits = 2)
+rsq<-format(summary(modelP)$r.squared, digits=2)
+
+#_______
+#Plot
+pdf("UnspikedP1P2.pdf", height=6, width=6) 
+ggplot(dfplotting) + 
+  geom_point(aes(x=P1_log2FoldChange, y=P2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Pig feces", subtitle=paste("P2 = ", slope, "*P1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange P1", y="log2FoldChange P2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=P1_log2FoldChange, y=P2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+dev.off()
+
+P1P2List <- list()
+P1P2List[[ "UnspikedComp0hwX" ]]<-ggplot(dfplotting) + 
+  geom_point(aes(x=P1_log2FoldChange, y=P2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Pig feces", x="log2FoldChange P1", y="log2FoldChange P2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=P1_log2FoldChange, y=P2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+
+ggplotly(ggplot(dfplotting) + 
+  geom_point(aes(x=P1_log2FoldChange, y=P2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Pig feces", subtitle=paste("P2 = ", slope, "*P1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange P1", y="log2FoldChange P2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=P1_log2FoldChange, y=P2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none"))
+```
+
+### 4 Create scatterplots sewage unspiked 
+```{r}
+#Create df from orgs shared across all Pig fecal samples or Sewage
+SharedOrgs<-merge(S1, S2, by="Genus")
+#Extract log2foldchanges
+dfall <- data.frame(select(SharedOrgs, matches("Genus|log2FoldChange")))
+#______
+#Merge for plotting
+dfplotting <- merge(dfall, Feature, by="Genus")
+#Create column org grouping for colouring 
+dfplotting$col <- ifelse(dfplotting$Phylum=="Firmicutes", "Firmicutes",
+          ifelse(dfplotting$Phylum=="Proteobacteria", "Proteobacteria",
+          ifelse(dfplotting$Phylum=="Actinobacteria", "Actinobacteria",
+          ifelse(dfplotting$Phylum=="Bacteroidetes", "Bacteroidetes",
+          ifelse(dfplotting$Domain=="Eukaryota", "Eukaryota",
+          ifelse(dfplotting$Domain=="Viruses", "Viruses",
+          ifelse(dfplotting$Domain=="Archaea", "Archaea",
+                 "Other")))))))
+dfplotting$col[dfplotting$Class=="Negativicutes"] <- "Firmicutes(Negativicutes)"
+dfplotting$col <- factor(dfplotting$col, levels=c("Proteobacteria", "Bacteroidetes", "Actinobacteria", "Firmicutes", "Firmicutes(Negativicutes)", "Eukaryota", "Archaea", "Viruses", "Other"))
+
+#Linear model info
+modelS<-lm(S2_log2FoldChange ~ S1_log2FoldChange, dfplotting)
+#Model validation
+plot(modelS)
+#summary(modelS)
+intercept = format(coef(modelS)[1], digits = 2)
+slope = format(coef(modelS)[2], digits = 2)
+rsq<-format(summary(modelS)$r.squared, digits=2)
+
+#_______
+#Plot
+pdf("UnspikedS1S2.pdf", height=6, width=6) 
+ggplot(dfplotting) + 
+  geom_point(aes(x=S1_log2FoldChange, y=S2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Sewage", subtitle=paste("S2 = ", slope, "*S1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange S1", y="log2FoldChange S2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=S1_log2FoldChange, y=S2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+dev.off()
+
+S1S2List <- list()
+S1S2List[[ "UnspikedComp0hwX" ]]<-ggplot(dfplotting) + 
+  geom_point(aes(x=S1_log2FoldChange, y=S2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Sewage", x="log2FoldChange S1", y="log2FoldChange S2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=S1_log2FoldChange, y=S2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+
+
+ggplotly(ggplot(dfplotting) + 
+  geom_point(aes(x=S1_log2FoldChange, y=S2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Sewage", subtitle=paste("S2 = ", slope, "*S1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange S1", y="log2FoldChange S2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=S1_log2FoldChange, y=S2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none"))
+```
+
+### 5 Read in data and create dataframes spiked
+The same analysis spiked
+```{r}
+#Read in data
+P1 <- read.delim(file="ResultsTableGenusP1spikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+#Add prefix to column names 
+colnames(P1)[7:14]<-paste("P1", colnames(P1)[7:14], sep="_")
+#Remove irrelevant taxonomy info
+P1 <- P1[,c(1, 7:14)]
+
+P2 <- read.delim(file="ResultsTableGenusP2spikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+colnames(P2)[7:14]<-paste("P2", colnames(P2)[7:14], sep="_")
+P2 <- P2[,c(1, 7:14)]
+
+S1 <- read.delim(file="ResultsTableGenusS1spikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+colnames(S1)[7:14]<-paste("S1", colnames(S1)[7:14], sep="_")
+S1 <- S1[,c(1, 7:14)]
+
+S2 <- read.delim(file="ResultsTableGenusS2spikedReplicate_Boxplot10.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+colnames(S2)[7:14]<-paste("S2", colnames(S2)[7:14], sep="_")
+S2 <- S2[,c(1, 7:14)]
+```
+
+
+### 6 Create Boxplots spiked 
+Boxplots are comparing shared organisms in all spiked samples 
+```{r}
+#Create df from orgs shared across all samples
+SharedOrgs<-merge(P1, merge(P2, merge(S1, S2, by="Genus"), by="Genus"), by="Genus")
+#Extract log2foldchanges
+dfall <- data.frame(select(SharedOrgs, matches("Genus|log2FoldChange")))
+#First column genus into rownames
+dfall <- data.frame(dfall[,-1], row.names=dfall[,1])
+#Transpose
+dfall <- data.frame(t(dfall))
+#Mean of sd 
+meanOrgs<-round(mean(apply(dfall, 2, sd)), digits=3)
+#Melt
+newdfall<-melt(dfall)
+#______
+#Change colnames
+colnames(newdfall) <- c("Genus", "value")
+#Add feature info to merge with newdfall
+#Feature <- read.delim(file="FeatureShort20180925.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+#Merge for plotting
+dfplotting <- merge(newdfall, Feature, by="Genus")
+#Create column org grouping for colouring 
+dfplotting$col <- ifelse(dfplotting$Phylum=="Firmicutes", "Firmicutes",
+          ifelse(dfplotting$Phylum=="Proteobacteria", "Proteobacteria",
+          ifelse(dfplotting$Phylum=="Actinobacteria", "Actinobacteria",
+          ifelse(dfplotting$Phylum=="Bacteroidetes", "Bacteroidetes",
+          ifelse(dfplotting$Domain=="Eukaryota", "Eukaryota",
+          ifelse(dfplotting$Domain=="Viruses", "Viruses",
+          ifelse(dfplotting$Domain=="Archaea", "Archaea",
+                 "Other")))))))
+dfplotting$col[dfplotting$Class=="Negativicutes"] <- "Firmicutes(Negativicutes)"
+dfplotting$col <- factor(dfplotting$col, levels=c("Proteobacteria", "Bacteroidetes", "Actinobacteria", "Firmicutes", "Firmicutes(Negativicutes)", "Eukaryota", "Archaea", "Viruses", "Other"))
+#_______
+#Make boxplots change order boxplots according to mean
+pdf("SpikedAllreorder.pdf", height=6, width=12) 
+ggplot(dfplotting) + 
+  geom_boxplot(aes(x=reorder(Genus, value, mean), y=value, color=col)) + 
+  theme_bw() +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank()) + 
+  geom_hline(yintercept=0) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Boxplots log2Foldchanges", subtitle=paste("P1unspiked, P2unspiked, S1unspiked, S2unspiked, mean sd ", meanOrgs, sep=""), x="Genera", y="log2Foldchange") 
+dev.off()
+#Add legend.position="none" to theme when have solution regarding 
+
+AllList[[ "SpikedP0hvs5C64h" ]]<-ggplot(dfplotting) + 
+  geom_boxplot(aes(x=reorder(Genus, value, mean), y=value, color=col)) + 
+  theme_bw() +
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none") + 
+  geom_hline(yintercept=0) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Boxplots log2Foldchanges", subtitle=paste("P1unspiked, P2unspiked, S1unspiked, S2unspiked, mean sd ", meanOrgs, sep=""), x="Genera", y="log2Foldchange") 
+```
+
+
+### 7 Create scatterplots pig feces spiked
+Does not seem informative to make boxplots when there is only two measures instead made scatterplot of the two pig feces samples and two sewage samples seperately
+```{r}
+#Create df from orgs shared across all Pig fecal samples or Sewage
+SharedOrgs<-merge(P1, P2, by="Genus")
+#Extract log2foldchanges
+dfall <- data.frame(select(SharedOrgs, matches("Genus|log2FoldChange")))
+#______
+#Merge for plotting
+dfplotting <- merge(dfall, Feature, by="Genus")
+#Create column org grouping for colouring 
+dfplotting$col <- ifelse(dfplotting$Phylum=="Firmicutes", "Firmicutes",
+          ifelse(dfplotting$Phylum=="Proteobacteria", "Proteobacteria",
+          ifelse(dfplotting$Phylum=="Actinobacteria", "Actinobacteria",
+          ifelse(dfplotting$Phylum=="Bacteroidetes", "Bacteroidetes",
+          ifelse(dfplotting$Domain=="Eukaryota", "Eukaryota",
+          ifelse(dfplotting$Domain=="Viruses", "Viruses",
+          ifelse(dfplotting$Domain=="Archaea", "Archaea",
+                 "Other")))))))
+dfplotting$col[dfplotting$Class=="Negativicutes"] <- "Firmicutes(Negativicutes)"
+dfplotting$col <- factor(dfplotting$col, levels=c("Proteobacteria", "Bacteroidetes", "Actinobacteria", "Firmicutes", "Firmicutes(Negativicutes)", "Eukaryota", "Archaea", "Viruses", "Other"))
+
+#Linear model info
+modelP<-lm(P2_log2FoldChange ~ P1_log2FoldChange, dfplotting)
+#Model validation
+plot(modelP)
+#summary(modelP)
+intercept = format(coef(modelP)[1], digits = 2)
+slope = format(coef(modelP)[2], digits = 2)
+rsq<-format(summary(modelP)$r.squared, digits=2)
+
+#_______
+#Plot
+pdf("SpikedP1P2.pdf", height=6, width=6) 
+ggplot(dfplotting) + 
+  geom_point(aes(x=P1_log2FoldChange, y=P2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Pig feces", subtitle=paste("P2 = ", slope, "*P1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange P1", y="log2FoldChange P2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=P1_log2FoldChange, y=P2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+dev.off()
+
+P1P2List[[ "SpikedComp0hwX" ]]<-ggplot(dfplotting) + 
+  geom_point(aes(x=P1_log2FoldChange, y=P2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Pig feces", x="log2FoldChange P1", y="log2FoldChange P2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=P1_log2FoldChange, y=P2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+
+ggplotly(ggplot(dfplotting) + 
+  geom_point(aes(x=P1_log2FoldChange, y=P2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Pig feces", subtitle=paste("P2 = ", slope, "*P1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange P1", y="log2FoldChange P2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=P1_log2FoldChange, y=P2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none"))
+```
+
+### 8 Create scatterplots sewage spiked 
+```{r}
+#Create df from orgs shared across all Pig fecal samples or Sewage
+SharedOrgs<-merge(S1, S2, by="Genus")
+#Extract log2foldchanges
+dfall <- data.frame(select(SharedOrgs, matches("Genus|log2FoldChange")))
+#______
+#Merge for plotting
+dfplotting <- merge(dfall, Feature, by="Genus")
+#Create column org grouping for colouring 
+dfplotting$col <- ifelse(dfplotting$Phylum=="Firmicutes", "Firmicutes",
+          ifelse(dfplotting$Phylum=="Proteobacteria", "Proteobacteria",
+          ifelse(dfplotting$Phylum=="Actinobacteria", "Actinobacteria",
+          ifelse(dfplotting$Phylum=="Bacteroidetes", "Bacteroidetes",
+          ifelse(dfplotting$Domain=="Eukaryota", "Eukaryota",
+          ifelse(dfplotting$Domain=="Viruses", "Viruses",
+          ifelse(dfplotting$Domain=="Archaea", "Archaea",
+                 "Other")))))))
+dfplotting$col[dfplotting$Class=="Negativicutes"] <- "Firmicutes(Negativicutes)"
+dfplotting$col <- factor(dfplotting$col, levels=c("Proteobacteria", "Bacteroidetes", "Actinobacteria", "Firmicutes", "Firmicutes(Negativicutes)", "Eukaryota", "Archaea", "Viruses", "Other"))
+
+#Linear model info
+modelS<-lm(S2_log2FoldChange ~ S1_log2FoldChange, dfplotting)
+#Model validation
+plot(modelS)
+#summary(modelS)
+intercept = format(coef(modelS)[1], digits = 2)
+slope = format(coef(modelS)[2], digits = 2)
+rsq<-format(summary(modelS)$r.squared, digits=2)
+
+#_______
+#Plot
+pdf("SpikedS1S2.pdf", height=6, width=6) 
+ggplot(dfplotting) + 
+  geom_point(aes(x=S1_log2FoldChange, y=S2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Sewage", subtitle=paste("S2 = ", slope, "*S1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange S1", y="log2FoldChange S2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=S1_log2FoldChange, y=S2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+dev.off()
+
+S1S2List[[ "SpikedComp0hwX" ]]<-ggplot(dfplotting) + 
+  geom_point(aes(x=S1_log2FoldChange, y=S2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Sewage", x="log2FoldChange S1", y="log2FoldChange S2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=S1_log2FoldChange, y=S2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none")
+
+
+ggplotly(ggplot(dfplotting) + 
+  geom_point(aes(x=S1_log2FoldChange, y=S2_log2FoldChange, color=col, group=Genus), size=1/2) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Sewage", subtitle=paste("S2 = ", slope, "*S1 + ", intercept, ", R^2 = ", rsq,    sep=""), x="log2FoldChange S1", y="log2FoldChange S2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=S1_log2FoldChange, y=S2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="none"))
+```
+
+
+
+### 9 Create figures 
+```{r}
+
+
+#Have the plots stored in lists
+lay <- rbind(c(2,1),
+             c(4,3),
+             c(6,5),
+             c(8,7),
+             c(10,9),
+             c(12,11),
+             c(12,11),
+             c(14,13),
+             c(14,13))
+pdf(paste("SF7to9DESeqAss.pdf", sep=""), width=17, height=30)
+grid.arrange(MAList$MAP1spiked, MAList$MAP1unspiked, MAList$MAP2spiked, MAList$MAP2unspiked, MAList$MAS1spiked, MAList$MAS1unspiked, MAList$MAS2spiked, MAList$MAS2unspiked, AllList$SpikedP0hvs5C64h, AllList$UnspikedComp0hwX, P1P2List$SpikedComp0hwX, P1P2List$UnspikedComp0hwX, S1S2List$SpikedComp0hwX, S1S2List$UnspikedComp0hwX, layout_matrix = lay)   
+dev.off() 
+
+
+#Have the plots stored in lists
+lay <- rbind(c(2,2,1,1),
+             c(4,4,3,3),
+             c(6,6,5,5),
+             c(8,8,7,7),
+             c(10,10,9,9),
+             c(12,14,11,13))
+pdf(paste("SF7to9DESeqAssAlternative.pdf", sep=""), width=17, height=23.5)
+grid.arrange(MAList$MAP1spiked, MAList$MAP1unspiked, MAList$MAP2spiked, MAList$MAP2unspiked, MAList$MAS1spiked, MAList$MAS1unspiked, MAList$MAS2spiked, MAList$MAS2unspiked, AllList$SpikedP0hvs5C64h, AllList$UnspikedComp0hwX, P1P2List$SpikedComp0hwX, P1P2List$UnspikedComp0hwX, S1S2List$SpikedComp0hwX, S1S2List$UnspikedComp0hwX, layout_matrix = lay) 
+dev.off()
+
+#Create legend and add in inkscape
+legend<-ggplot(dfplotting) + 
+  geom_point(aes(x=S1_log2FoldChange, y=S2_log2FoldChange, color=col, group=Genus), size=5) + 
+  scale_color_manual(values=Orgcol) + 
+  labs(title="Plot log2FoldChange Sewage", x="log2FoldChange S1", y="log2FoldChange S2") + 
+  #geom_abline(intercept=0, slope=1) +
+  geom_smooth(aes(x=S1_log2FoldChange, y=S2_log2FoldChange), method=lm) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position="bottom", legend.title=element_blank())
+legendplot<-get_legend(legend)
+pdf(paste("LegendSF7to9", "Genus", ".pdf", sep=""), width=17, height=12)
+grid.arrange(legendplot)
+dev.off()
+```
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```

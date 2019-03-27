@@ -1,0 +1,230 @@
+
+---
+title: "Variables of importance (Adonis::Vegan)"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+The purpose of the following code is to perform multivariate analysis of variances to compare storage groups using vegan::adonis, model assumptions assessed using vegan::betadisper.  
+
+Betadisper can only evaluate one factor. Can run it on experiment and time and temperature combined.  
+
+
+
+### Packages 
+```{r}
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(knitr) #A General-Purpose Package for Dynamic Report Generation in R help(package="knitr")
+```
+
+## Define variables
+Define variables used in the analysis. Have to change test factor in code line 184&195 (remember to update) 
+Also possible to update the number of permutations
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- "SWspiked"
+i <- Subset
+#Experiment: c("Allunspiked", "PFunspiked", "SWunspiked", "Allspiked", "PFspiked", "SWspiked") 
+#TimeTemp: c("Allunspiked", "PFunspiked", "SWunspiked", "P1unspiked", "P2unspiked", "S1unspiked", "S2unspiked", "Allspiked", "PFspiked", "SWspiked", "P1spiked", "P2spiked", "S1spiked", "S2spiked")
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Vegdist dissimilarity method
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+
+#Decostand standardization method
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log
+
+#Filtering of the count table. This is especially important to remove organisms after subsetting that are for instance not represented in pig feces 1 spiked ..., In the MAplot you can also see that the removed organisms are the low abundant ones that are already shrunk
+Filter_Rows<-0 #Is based on row sums so can take integer values 
+```
+
+
+## Analysis
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 2 Subsetting, adonis, betadisper
+Creating tables for all individual tests. Additional overview of p-values created. To see evaluation plots remove hashtags.   
+Using for loop to go through Subset vector
+```{r}
+#Make empty dataframe to add p-values
+dfp<-data.frame()
+dfp<-data.frame(Test=c("adonis", "betadisperAnova", "betadisperPermutest"))
+
+#for (i in Subset) {
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (i=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (i=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (i=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (i=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (i=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (i=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (i=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (i=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (i=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (i=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (i=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (i=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (i=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (i=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (i=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (i=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (i=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (i=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (i=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (i=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (i=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-dplyr::select(Tax, one_of(Metadata2$Sample))
+
+#Filtering of the Counttable depending on rowSums. 
+Tax2 <- Tax2[rowSums(Tax2)>Filter_Rows*length(Tax2),]
+
+#Make column that combine all storage conditions to individual factors in the following test
+Metadata2$TimeTemp<-paste(Metadata2$Temperature, Metadata2$Time, sep="_")
+
+#Calculate sample-distance matrix 
+distmatrix <- vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+
+#Which factor to test can pick Metadata2 columns: Experiment and TimeTemp 
+Test_Factor <- "Experiment" #Experiment, TimeTemp
+#Create design formula
+design <- formula(paste("distmatrix"," ~ ", Test_Factor, sep=""))
+#adonis can handle both continous and factor predictors 
+set.seed(999)
+adonisObject<-adonis2(design, Metadata2, by="margin", perm=9999) #, perm=999 can increase to get exact p-values  
+#adonisObject #If significant then difference between groups 
+#Sys.sleep(1)
+write.table(data.frame(adonisObject), file=paste(i, "Adonis", "_", Test_Factor, ".txt", sep=""), sep="\t", dec=".", row.names = T, quote = F)
+
+#### Evaluating the model assumptions  
+TestModel <- with(Metadata2, betadisper(distmatrix, Experiment)) #Also have to change here Experiment or TimeTemp Can not run betadisper with multiple independant variables
+#TestModel
+#plot(TestModel)
+plot(TestModel, label=FALSE)
+#boxplot(TestModel)
+#anova(TestModel)
+anovaTestModel<-anova(TestModel) #p>0.05 -> Assumption met
+write.table(data.frame(anova(TestModel)), file=paste(i, "Betadisper", "_", Test_Factor, ".txt", sep=""), sep="\t", dec=".", row.names = T, quote = F)
+set.seed(999)
+#permutest(TestModel)
+permy<-permutest(TestModel) 
+#data.frame(permy$tab)
+write.table(data.frame(permy$tab), file=paste(i, "Permutest", "_", Test_Factor, ".txt", sep=""), sep="\t", dec=".", row.names = T, quote = F)
+#p>0.05 -> Assumption met
+
+TukeyHSD(TestModel, perm=999) #Increasing perm does not change p adj
+dfp[paste(i)]<-c(adonisObject$`Pr(>F)`[1], anovaTestModel$`Pr(>F)`[1], permy$tab$`Pr(>F)`[1])
+#}
+
+write.table(dfp, file=paste("Pvalues", Test_Factor, ".txt", sep=""), sep="\t", dec=".", row.names = T, quote = F)
+```
+
+### 3 p-values from tests
+adonis if significant there is a difference between groups defined by Test_Factor  
+betadisper - Anova and Permutest differences in group homogeneities are not violated if above 0.05  
+```{r}
+kable(dfp, caption=paste(Test_Factor))
+```
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```

@@ -1,0 +1,83 @@
+---
+title: "Create Stacked bar charts mock community organisms"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+Creating stacked bar charts from mock community organisms.  
+The data were created from SF10andST7MCorgsStackedBar1.Rmd and data from microscopy counts, CFU counts, and DNA isolation concentrations. See ST7 for all data structured to run this script. 
+
+### Packages
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")
+```
+
+
+## Analysis
+### 1 Create stacked bar charts 
+```{r}
+Spike <- read.delim(file="ST7StackedMCorgs.txt", check.names=FALSE, stringsAsFactors = FALSE, strip.white=TRUE, dec=",")
+
+#Change order of boxplots on x-axis
+Spike$Type<-as.factor(Spike$Type)
+levels(Spike$Type)
+Spike$Type<-ordered(Spike$Type, levels=c("Mic", "CFU", "Con","0h", "16h-80C", "64h-80C", "16h-20C", "64h-20C", "16h5C", "64h5C", "16h22C", "64h22C")) #Have to change according to Type #17_9 "Mic", "CFU", "Con", "GSRelMC", "DESeqGSRel0h", "DESeqGSRel16h80C", "DESeqGSRel16h20C", "DESeqGSRel16h5C", "DESeqGSRel16h22C", "DESeqGSRel64h80C", "DESeqGSRel64h20C", "DESeqGSRel64h5C", "DESeqGSRel64h22C" #17_1 "Mic", "CFU", "Con", "RelMC", "RelS", "GSRelMC", "GSRelS", "GSHelMC", "GSHelS", "GSdWiMC", "GSdWiS", "GSlogMC", "GSlogS", "GSSchisMC", "GSchisS"
+levels(Spike$Type)
+#Change order of Organisms
+Spike$Organism<-as.factor(Spike$Organism)
+levels(Spike$Organism)
+Spike$Organism<-ordered(Spike$Organism, levels=c("Propionibacterium", "Staphylococcus", "Bacteroides","Fusobacterium", "Escherichia", "Salmonella", "Saccharomyces", "Cryptosporidium"))
+levels(Spike$Organism)
+
+ggplot(Spike, aes(x = Type, y = Value_percent, fill=Organism)) + facet_wrap(~Facet) + geom_bar(stat = "identity") +
+scale_fill_brewer(palette="Set1") + xlab("Type") + ylab("Percentage (%)")+ theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+pdf("SF10StackedBarMCOrg.pdf", height=8, width=12)
+ggplot(Spike, aes(x = Type, y = Value_percent, fill=Organism)) + 
+  facet_wrap(~Facet) + geom_bar(stat = "identity") +
+  scale_fill_brewer(palette="Set1") + 
+  xlab("Type") + 
+  ylab("Percentage (%)")+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") + 
+  guides(fill = guide_legend(nrow = 1))
+dev.off()
+
+png("SF10StackedBarMCOrg.png", height=800, width=1200)
+ggplot(Spike, aes(x = Type, y = Value_percent, fill=Organism)) + 
+  facet_wrap(~Facet) + geom_bar(stat = "identity") +
+  scale_fill_brewer(palette="Set1") + 
+  xlab("Type") + 
+  ylab("Percentage (%)")+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") + 
+  guides(fill = guide_legend(nrow = 1))
+dev.off()
+```
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+
+
+
+

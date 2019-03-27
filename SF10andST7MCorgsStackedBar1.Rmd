@@ -1,0 +1,264 @@
+---
+title: "Data structuring to create stacked barcharts of mock community organisms"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+The data structuring is performed in excel to add the information on microscopy counts 
+To account for the background in the spiked samples a factor (spiked/unspiked) was calculated from the non-mock community genera present in the samples. This factor was unique for sample and storage condition. The factor was used to multiply mock community genera in the unspiked samples obtaining a more precise estimate of the background in the spiked samples and then subtracted from the according genera in the spiked samples. This procedure was performed to account for the compositionality of data and therefore that the mock community recruits reads from the background.
+The median of the factors is used for correction.
+
+### Packages
+```{r}
+library(reshape2) # Flexibly restructure and aggregate data using just two functions: melt and 'dcast' (or 'acast'). help(package="reshape2")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(Rmisc) #The Rmisc library contains many functions useful for data analysis. Include summarySE help(package="Rmisc")
+```
+
+
+## Define variables
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<-"All" #All, Allspiked, Allunspiked, PF, SW, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Filtering which organisms to include
+OrgFlt<-"All" #All, Bac, BacSacCry, BacArcVirSacCry 
+
+#Organisms used to find factor is only based on the ones being present above a mean relative abundance of 0.001 
+j<-0.001
+```
+
+## Analysis
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+
+### 2 Subsetting 
+```{r}
+#Subsetting metadata
+if (Subset=="Allspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata<-filter(Metadata, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata<-filter(Metadata, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata<-filter(Metadata, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata<-filter(Metadata, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubExp=="HX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata2<-filter(Metadata, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata2$Matching_samples)
+  Metadata<-filter(Metadata, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata2)
+} else if (SubExp=="HXFTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata<-filter(Metadata, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting metadata
+if (SubFre=="Frozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata<-filter(Metadata, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax<-select(Tax, one_of(Metadata$Sample))
+```
+
+
+### 3 Calculate factors, subtract corrected background values and create relative values of MC orgs. 
+```{r}
+df<-data.frame()
+for (i in c("P1_0h|P1MC_0h", "P2_0h|P2MC_0h", "S1_0h|S1MC_0h", "S2_0h|S2MC_0h", "P1_16h_20C|P1MC_16h_20C", "P2_16h_20C|P2MC_16h_20C", "S1_16h_20C|S1MC_16h_20C", "S2_16h_20C|S2MC_16h_20C", "P1_16h_80C|P1MC_16h_80C", "P2_16h_80C|P2MC_16h_80C", "S1_16h_80C|S1MC_16h_80C", "S2_16h_80C|S2MC_16h_80C", "P1_16h_22C|P1MC_16h_22C", "P2_16h_22C|P2MC_16h_22C", "S1_16h_22C|S1MC_16h_22C", "S2_16h_22C|S2MC_16h_22C", "P1_16h_5C|P1MC_16h_5C", "P2_16h_5C|P2MC_16h_5C", "S1_16h_5C|S1MC_16h_5C", "S2_16h_5C|S2MC_16h_5C", "P1_64h_20C|P1MC_64h_20C", "P2_64h_20C|P2MC_64h_20C", "S1_64h_20C|S1MC_64h_20C", "S2_64h_20C|S2MC_64h_20C","P1_64h_80C|P1MC_64h_80C", "P2_64h_80C|P2MC_64h_80C", "S1_64h_80C|S1MC_64h_80C", "S2_64h_80C|S2MC_64h_80C", "P1_64h_22C|P1MC_64h_22C", "P2_64h_22C|P2MC_64h_22C", "S1_64h_22C|S1MC_64h_22C", "S2_64h_22C|S2MC_64h_22C", "P1_64h_5C|P1MC_64h_5C", "P2_64h_5C|P2MC_64h_5C", "S1_64h_5C|S1MC_64h_5C", "S2_64h_5C|S2MC_64h_5C")) {
+  for (j in c(0.001)) {
+    TaxP1<-select(Tax, matches(i))
+    TaxP2<-TaxP1[rowSums(TaxP1)>j ,]
+    P1orgs<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+    tTaxSelectP1<-select(as.data.frame(t(TaxP2)), -one_of(c(P1orgs))) #Does the filtering first gets a warning if organisms are already filteret. Now how a df containing the selected samples above the specified threshold excluding spiked orgs. 
+    tTaxSelectP1<-add_rownames(tTaxSelectP1, "Sample")
+    Metadata2<-merge(Metadata, tTaxSelectP1, by="Sample")
+    #Create df with Sample_type and orgs
+    Metadata2 <- select(Metadata2, one_of("Sample_type", c(colnames(tTaxSelectP1))))
+    Metadata2 <- select(Metadata2, -one_of("Sample"))
+    #Long format
+    Metadata2 <- melt(Metadata2, id.var="Sample_type")
+    #Calculate average and variation
+    Metadata2 <- summarySE(Metadata2, measurevar="value", groupvars=c("Sample_type", "variable"))
+    #Make df with unspiked followed by spiked. 
+    spiked<-filter(Metadata2, grepl("spiked", Sample_type)) 
+    spiked$spiked<-spiked$value
+    unspiked<-filter(Metadata2, !grepl("spiked", Sample_type)) 
+    unspiked$unspiked<-unspiked$value
+    #Merge
+    Factors<-merge(spiked, unspiked, by="variable")
+    Factors$Factors<-Factors$spiked/Factors$unspiked
+    Sample_id<-i
+    median<-median(Factors$Factors)
+    df<-rbind(df, data.frame(Sample_id, median))
+}
+}
+
+#Select pureMC, unspiked, and spiked samples at time 0
+Tax2<-select(Tax, -matches("pure|EC"))
+
+#Select only spiked orgs
+SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+tTaxSelect<-select(as.data.frame(t(Tax2)), one_of(c(SpikedGenus)))
+
+##Add to take genome size into account
+#GenomeSize<-c(5.20344, 5.2417, 4.9641, 2.1745, 2.64917, 2.82136, 9.10232, 12.1571)
+#GenomeSizes<-bind_cols(as.data.frame(SpikedGenus), as.data.frame(GenomeSize))
+#struc1<-as.data.frame(t(tTaxSelect))
+#struc2<-add_rownames(struc1, "SpikedGenus")
+#struc3<-merge(struc2, GenomeSizes, by="SpikedGenus")
+#struc4<-as.data.frame(struc3[,-1], row.names=struc3[,1])
+#struc5<-as.data.frame(sweep(data.matrix(struc4[,1:212]), 1, data.matrix(struc4[,213]), FUN="/")) #Change when number of samples changes
+#tTaxSelect<-as.data.frame(t(struc5))
+
+##Remove the weird sample 596
+#tTaxSelect<-tTaxSelect[-16,] #Change
+
+#Do the subtracting of unspiked, before making it into relative abundance therefore lib size norm becomes important
+tTaxSelect<-add_rownames(tTaxSelect, "Sample")
+
+#Merge with metadata
+Meta<-merge(Metadata, tTaxSelect, by="Sample")
+
+#Create df with Sample_type and orgs
+Meta2 <- select(Meta, one_of("Replicate_Boxplot", "Sample_type", c(SpikedGenus)))
+
+#Long format
+Meta3 <- melt(Meta2, id.var=c("Replicate_Boxplot", "Sample_type"))
+
+#Calculate average and variation
+Meta4 <- summarySE(Meta3, measurevar="value", groupvars=c("Replicate_Boxplot", "Sample_type", "variable"))
+
+#Make into wide format
+Meta5 <- select(Meta4, one_of(c("Sample_type", "Replicate_Boxplot", "variable", "value")))
+#Meta6 <- dcast(data=Meta4, variable~Sample_type+Replicate_Boxplot, value.var="value")
+
+#Structure factors for further calc
+df2<-df[rep(seq_len(nrow(df)), each=8),]
+#Structure
+dfspiked<-filter(Meta5, grepl("spiked", Sample_type))
+dfunspiked<-filter(Meta5, !grepl("spiked", Sample_type)) 
+#Bind 
+Meta6<-bind_cols(dfspiked, dfunspiked, df2)
+
+#Take calculated factor and multiply with unspiked
+Meta6$unspikednew<-Meta6$value1*Meta6$median
+
+#Make newly calculated norm counts of spiked in organisms only comprising the proportion that was spiked. Decided on this naming because it was easier to select below
+Meta6$Spikedonlyadd<-Meta6$value-Meta6$unspikednew
+
+#
+Meta6$id<-paste(Meta6$Sample_type, Meta6$Replicate_Boxplot, sep="")
+Meta7<-select(Meta6, one_of(c("id", "variable", "Spikedonlyadd")))
+#wide format
+Meta8 <- dcast(data=Meta7, variable~id, value.var="Spikedonlyadd")
+
+#Make it into relative abundance
+Meta8 <- data.frame(Meta8[,-1], row.names=Meta8[,1])
+Meta9<-t(Meta8)
+prop<-as.data.frame(t(Meta9/apply(Meta9,1,sum)))
+prop<-add_rownames(prop, "Sample_type")
+
+#Long format
+prop <- melt(prop, id.var="Sample_type")
+
+#Save table and structure in excel. 
+write.table(prop, file="StackedDatatocreateST7_181113.txt", sep="\t", dec=",", row.names = F, quote = F)
+
+#Add to the excel file metadata structure and save new file spike, be aware  of the data from mic, CFU, concentration and pureMC
+```
+
+
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+
+

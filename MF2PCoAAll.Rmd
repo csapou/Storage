@@ -1,0 +1,1489 @@
+---
+title: "Ordination PCoA all"
+author: "Casper Sahl Poulsen"
+date: '`r format(Sys.time(), "%B %d, %Y")`'
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      results = "hold", 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "center")
+```
+
+## Introduction
+PCoA plots of all samples and divided into pig feces and sewage. Script also include the creation of validation plots (stessplots and screeplots).
+
+### Packages 
+```{r}
+library(ggplot2) #Data visualization, based on grammar of graphics. help(package="ggplot2")  
+library(vegan) #Community ecology package, ordination methods, diversity analysis and other functions for community and vegetation ecologists. help(package="vegan")
+library(dplyr) #A grammar of data manipulation. A fast, consistent tool for working with data frame like objects. help(package="dplyr")
+library(gridExtra)
+library(reshape2)
+library(tidyr)
+library(cowplot)
+```
+
+
+## Define variables
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("Allunspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Subset experiment, Experiment_Type. (Meaningfull combinations of subset and SubExp: HX=All, FTX=P1&S1, LTX=P1&S1, LPSX=All unspiked, HXFTX=P1&S1, HXLTX=P1&S1, HXLPSX=All unspiked, HXLTXLPSX=P1&S1 unspiked)
+SubExp<-"HX" #HX, FTX, LTX, LPSX, HXFTX, HXLTX, HXLPSX, HXLTXLPSX, HXFTXLTX, All 
+
+#Subset Frozen Unfrozen
+SubFre<-"Both" #Frozen, Unfrozen, Both
+
+#Filtering which organisms to include
+OrgFlt<-"All" #All, Bac, BacSacCry, BacArcVirSacCry 
+
+Stand<-"hellinger" #total, max, freq, normalize, range, standardize, pa, chi.square, hellinger, log, DESeqTrans
+
+#Vegdist dissimilarity method
+Dist<-"bray" #manhattan, euclidean, canberra, bray, kulczynski, jaccard, gower, altGower, morisita, horn, mountford, raup, binomial, chao, cao or mahalanobis
+
+#Define coloring schemes
+Storagecol<-c("Immediate" = "#999999", "-80" = "#0571b0", "-20" = "#92c5de", "5" = "#f4a582", "22" = "#ca0020")
+Experimentcol<-c("Pig_feces_1" = "#30241E", "Pig_feces_2" = "#B59B80", "Sewage_1" = "#33a02c", "Sewage_2" = "#B2DF8A")
+```
+
+### Lists holding plots
+```{r}
+# Create a list to hold the plot objects.
+ScreeList <- list()
+StressList <- list()
+PCoAList <- list()
+```
+
+
+## Analysis 
+### 1 Read in data
+```{r}
+Tax <- read.delim(file="Taxonomy20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+Metadata <- read.delim(file="Metadata20180925.txt", check.names=FALSE, stringsAsFactors=FALSE, strip.white=TRUE)
+```
+
+### 2 Subsetting and plotting all unspiked
+```{r}
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#5.1 collapse analysis to P1... by removing spiked in orgs. 
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remake proportions
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+#5.2 filtering
+##Filtering of the Counttable depending on rowSums. 
+#Tax2 <- Tax2[rowSums(Tax2)>0,]
+#Tax2 <- Tax2[rowSums(Tax2)>0.001*length(Tax2),]
+
+#Remake proportions don't need when filtering rowSums with 0
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+
+#6 PCoA with capscale can also generate stressplots
+distobj<-vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+#Multi dimensional scaling with capscale 
+PCoAcsObject<-capscale(distobj~1)
+
+
+#Make stressplot
+#Extract ordination distances and merge with observed dissimilarity
+stress<-stressplot(PCoAcsObject)
+df <- melt(as.matrix(stress))
+names(df)<-c("rowOrd", "colOrd", "OrdDist")
+df<-filter(df, OrdDist>0)
+df2 <- melt(as.matrix(distobj))
+names(df2)<-c("rowObs", "colObs", "ObsDism")
+df2<-filter(df2, ObsDism>0)
+df<-unite(df, mergecol, c(rowOrd, colOrd), remove=FALSE)
+df2<-unite(df2, mergecol, c(rowObs, colObs), remove=FALSE)
+ggstress<-merge(df, df2, by="mergecol")
+
+#Create plot name
+pltName <- paste( 'stress', Subset, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot(ggstress) + 
+  geom_point(aes(ObsDism, OrdDist)) +
+  ggtitle(paste("Stressplot", Subset, sep=" ")) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+##Add eig to plot axes. with cmdscale there are negative values not with capscale
+eig <- PCoAcsObject$CA$eig
+# Calculate the variation explained by PCoA1, 2, 3 and 4
+# and use it to generate axis labels
+eig_1_2 <- eig[1:4] / sum(eig) * 100
+eig_1 <- paste("PCoA1", round(eig_1_2[1], digits = 2), "% variance")
+eig_2 <- paste("PCoA2", round(eig_1_2[2], digits = 2), "% variance")
+eig_3 <- paste("PCoA3", round(eig_1_2[3], digits = 2), "% variance")
+eig_4 <- paste("PCoA4", round(eig_1_2[4], digits = 2), "% variance")
+
+##Pull out coordinates for plotting from the ca object
+#Structuring to add to Metadata2
+PCoACA<-PCoAcsObject$CA #The ca object contains the actual ordination results: u ((Weighted) orthonormal site        scores), v ((Weighted) orthonormal species scores) all na in mine, Xbar (The standardized data matrix after          previous stages of analysis), and imaginary.u.eig ???. Info                                     http://cc.oulu.fi/~jarioksa/softhelp/vegan/html/cca.object.html   
+PCoA<-as.data.frame(PCoACA$u)
+#Change colnames. Now add dis and trans info to names 
+colnames(PCoA) <- c("MDS1BrayHel","MDS2BrayHel", "MDS3BrayHel","MDS4BrayHel")
+#Add row names to df
+PCoA$Sample <- row.names(PCoA)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, PCoA, by="Sample")
+
+
+#Creating column in Metadata2 for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Immediate"
+
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+
+#Create plot name
+pltName <- paste( 'PCoA', Subset, sep = '' )
+#create PCoA
+PCoAList[[ pltName ]]<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(MDS1BrayHel, MDS2BrayHel, color = Sample_type_new, group=Sample, size=0.001)) +
+  scale_color_manual(values=Experimentcol) + 
+  ggtitle(paste("a)", Subset)) + 
+  labs(colour="Sample", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none") #+ 
+  #scale_y_reverse() #If you want the y scale reversed, to make plots easier to compare
+  #scale_x_reverse() #If you want the x scale reversed, to make plots easier to compare
+#ggsave(paste("CapscalePCoAYoungCOMPARE", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+#Screeplot 
+screeplot<-data.frame(PCoAcsObject$CA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', Subset, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + ggtitle(paste("Screeplot ", Subset)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCapscalePCoA", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+#Legend plot of samples 
+legend<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(MDS1BrayHel, MDS2BrayHel, color = Sample_type_new, group=Sample), size=12) +
+  scale_color_manual(values=Experimentcol) + 
+  ggtitle(paste("a)", Subset)) + 
+  labs(colour="Sample", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+legendplot<-get_legend(legend)
+pdf(paste("LegendPCoA1", ".pdf", sep=""), width=2.4, height=4)
+grid.arrange(legendplot)
+dev.off()
+```
+
+### 3 Subsetting and plotting pig feces unspiked 
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("PFunspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#5.1 collapse analysis to P1... by removing spiked in orgs. 
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remake proportions
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+#5.2 filtering
+##Filtering of the Counttable depending on rowSums. 
+#Tax2 <- Tax2[rowSums(Tax2)>0,]
+#Tax2 <- Tax2[rowSums(Tax2)>0.001*length(Tax2),]
+
+#Remake proportions don't need when filtering rowSums with 0
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+
+#6 PCoA with capscale can also generate stressplots
+distobj<-vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+#Multi dimensional scaling with capscale 
+PCoAcsObject<-capscale(distobj~1)
+
+
+#Make stressplot
+#Extract ordination distances and merge with observed dissimilarity
+stress<-stressplot(PCoAcsObject)
+df <- melt(as.matrix(stress))
+names(df)<-c("rowOrd", "colOrd", "OrdDist")
+df<-filter(df, OrdDist>0)
+df2 <- melt(as.matrix(distobj))
+names(df2)<-c("rowObs", "colObs", "ObsDism")
+df2<-filter(df2, ObsDism>0)
+df<-unite(df, mergecol, c(rowOrd, colOrd), remove=FALSE)
+df2<-unite(df2, mergecol, c(rowObs, colObs), remove=FALSE)
+ggstress<-merge(df, df2, by="mergecol")
+
+#Create plot name
+pltName <- paste( 'stress', Subset, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot(ggstress) + 
+  geom_point(aes(ObsDism, OrdDist)) +
+  ggtitle(paste("Stressplot", Subset, sep=" ")) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+##Add eig to plot axes. with cmdscale there are negative values not with capscale
+eig <- PCoAcsObject$CA$eig
+# Calculate the variation explained by PCoA1, 2, 3 and 4
+# and use it to generate axis labels
+eig_1_2 <- eig[1:4] / sum(eig) * 100
+eig_1 <- paste("PCoA1", round(eig_1_2[1], digits = 2), "% variance")
+eig_2 <- paste("PCoA2", round(eig_1_2[2], digits = 2), "% variance")
+eig_3 <- paste("PCoA3", round(eig_1_2[3], digits = 2), "% variance")
+eig_4 <- paste("PCoA4", round(eig_1_2[4], digits = 2), "% variance")
+
+##Pull out coordinates for plotting from the ca object
+#Structuring to add to Metadata2
+PCoACA<-PCoAcsObject$CA #The ca object contains the actual ordination results: u ((Weighted) orthonormal site        scores), v ((Weighted) orthonormal species scores) all na in mine, Xbar (The standardized data matrix after          previous stages of analysis), and imaginary.u.eig ???. Info                                     http://cc.oulu.fi/~jarioksa/softhelp/vegan/html/cca.object.html   
+PCoA<-as.data.frame(PCoACA$u)
+#Change colnames. Now add dis and trans info to names 
+colnames(PCoA) <- c("MDS1BrayHel","MDS2BrayHel", "MDS3BrayHel","MDS4BrayHel")
+#Add row names to df
+PCoA$Sample <- row.names(PCoA)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, PCoA, by="Sample")
+
+
+#Creating column in Metadata2 for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Immediate"
+
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+
+#Create plot name
+pltName <- paste( 'PCoA', Subset, sep = '' )
+#create PCoA
+PCoAList[[ pltName ]]<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Temperature, group = Sample, shape = Time, size=0.001)) +
+  #stat_ellipse(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Experiment), type="norm", size=1, level=0.70) +
+  scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+  ggtitle(paste("b)", Subset)) + 
+  labs(colour="Temperature (°C)", shape="Time (h)", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none") #+ 
+  #scale_y_reverse() #If you want the y scale reversed, to make plots easier to compare
+  #scale_x_reverse() #If you want the x scale reversed, to make plots easier to compare
+#ggsave(paste("CapscalePCoAYoungCOMPARE", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+#Screeplot 
+screeplot<-data.frame(PCoAcsObject$CA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', Subset, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + ggtitle(paste("Screeplot ", Subset)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCapscalePCoA", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+```
+
+### 4 Subsetting and plotting sewage unspiked
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("SWunspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#5.1 collapse analysis to P1... by removing spiked in orgs. 
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remake proportions
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+#5.2 filtering
+##Filtering of the Counttable depending on rowSums. 
+#Tax2 <- Tax2[rowSums(Tax2)>0,]
+#Tax2 <- Tax2[rowSums(Tax2)>0.001*length(Tax2),]
+
+#Remake proportions don't need when filtering rowSums with 0
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+
+#6 PCoA with capscale can also generate stressplots
+distobj<-vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+#Multi dimensional scaling with capscale 
+PCoAcsObject<-capscale(distobj~1)
+
+
+#Make stressplot
+#Extract ordination distances and merge with observed dissimilarity
+stress<-stressplot(PCoAcsObject)
+df <- melt(as.matrix(stress))
+names(df)<-c("rowOrd", "colOrd", "OrdDist")
+df<-filter(df, OrdDist>0)
+df2 <- melt(as.matrix(distobj))
+names(df2)<-c("rowObs", "colObs", "ObsDism")
+df2<-filter(df2, ObsDism>0)
+df<-unite(df, mergecol, c(rowOrd, colOrd), remove=FALSE)
+df2<-unite(df2, mergecol, c(rowObs, colObs), remove=FALSE)
+ggstress<-merge(df, df2, by="mergecol")
+
+#Create plot name
+pltName <- paste( 'stress', Subset, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot(ggstress) + 
+  geom_point(aes(ObsDism, OrdDist)) +
+  ggtitle(paste("Stressplot", Subset, sep=" ")) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+##Add eig to plot axes. with cmdscale there are negative values not with capscale
+eig <- PCoAcsObject$CA$eig
+# Calculate the variation explained by PCoA1, 2, 3 and 4
+# and use it to generate axis labels
+eig_1_2 <- eig[1:4] / sum(eig) * 100
+eig_1 <- paste("PCoA1", round(eig_1_2[1], digits = 2), "% variance")
+eig_2 <- paste("PCoA2", round(eig_1_2[2], digits = 2), "% variance")
+eig_3 <- paste("PCoA3", round(eig_1_2[3], digits = 2), "% variance")
+eig_4 <- paste("PCoA4", round(eig_1_2[4], digits = 2), "% variance")
+
+##Pull out coordinates for plotting from the ca object
+#Structuring to add to Metadata2
+PCoACA<-PCoAcsObject$CA #The ca object contains the actual ordination results: u ((Weighted) orthonormal site        scores), v ((Weighted) orthonormal species scores) all na in mine, Xbar (The standardized data matrix after          previous stages of analysis), and imaginary.u.eig ???. Info                                     http://cc.oulu.fi/~jarioksa/softhelp/vegan/html/cca.object.html   
+PCoA<-as.data.frame(PCoACA$u)
+#Change colnames. Now add dis and trans info to names 
+colnames(PCoA) <- c("MDS1BrayHel","MDS2BrayHel", "MDS3BrayHel","MDS4BrayHel")
+#Add row names to df
+PCoA$Sample <- row.names(PCoA)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, PCoA, by="Sample")
+
+
+#Creating column in Metadata2 for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Immediate"
+
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+
+#Create plot name
+pltName <- paste( 'PCoA', Subset, sep = '' )
+#create PCoA
+PCoAList[[ pltName ]]<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Temperature, group = Sample, shape = Time, size=0.001)) +
+  #stat_ellipse(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Experiment), type="t", size=1) +
+  scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+  ggtitle(paste("c)", Subset)) + 
+  labs(colour="Temperature (°C)", shape="Time (h)", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none") #+ 
+  #scale_y_reverse() #If you want the y scale reversed, to make plots easier to compare
+  #scale_x_reverse() #If you want the x scale reversed, to make plots easier to compare
+#ggsave(paste("CapscalePCoAYoungCOMPARE", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+
+#Screeplot 
+screeplot<-data.frame(PCoAcsObject$CA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', Subset, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + ggtitle(paste("Screeplot ", Subset)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCapscalePCoA", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+```
+
+
+
+
+### 5 Subsetting and plotting all spiked
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("Allspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#5.1 collapse analysis to P1... by removing spiked in orgs. 
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remake proportions
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+#5.2 filtering
+##Filtering of the Counttable depending on rowSums. 
+#Tax2 <- Tax2[rowSums(Tax2)>0,]
+#Tax2 <- Tax2[rowSums(Tax2)>0.001*length(Tax2),]
+
+#Remake proportions don't need when filtering rowSums with 0
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+
+#6 PCoA with capscale can also generate stressplots
+distobj<-vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+#Multi dimensional scaling with capscale 
+PCoAcsObject<-capscale(distobj~1)
+
+
+#Make stressplot
+#Extract ordination distances and merge with observed dissimilarity
+stress<-stressplot(PCoAcsObject)
+df <- melt(as.matrix(stress))
+names(df)<-c("rowOrd", "colOrd", "OrdDist")
+df<-filter(df, OrdDist>0)
+df2 <- melt(as.matrix(distobj))
+names(df2)<-c("rowObs", "colObs", "ObsDism")
+df2<-filter(df2, ObsDism>0)
+df<-unite(df, mergecol, c(rowOrd, colOrd), remove=FALSE)
+df2<-unite(df2, mergecol, c(rowObs, colObs), remove=FALSE)
+ggstress<-merge(df, df2, by="mergecol")
+
+#Create plot name
+pltName <- paste( 'stress', Subset, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot(ggstress) + 
+  geom_point(aes(ObsDism, OrdDist)) +
+  ggtitle(paste("Stressplot", Subset, sep=" ")) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+##Add eig to plot axes. with cmdscale there are negative values not with capscale
+eig <- PCoAcsObject$CA$eig
+# Calculate the variation explained by PCoA1, 2, 3 and 4
+# and use it to generate axis labels
+eig_1_2 <- eig[1:4] / sum(eig) * 100
+eig_1 <- paste("PCoA1", round(eig_1_2[1], digits = 2), "% variance")
+eig_2 <- paste("PCoA2", round(eig_1_2[2], digits = 2), "% variance")
+eig_3 <- paste("PCoA3", round(eig_1_2[3], digits = 2), "% variance")
+eig_4 <- paste("PCoA4", round(eig_1_2[4], digits = 2), "% variance")
+
+##Pull out coordinates for plotting from the ca object
+#Structuring to add to Metadata2
+PCoACA<-PCoAcsObject$CA #The ca object contains the actual ordination results: u ((Weighted) orthonormal site        scores), v ((Weighted) orthonormal species scores) all na in mine, Xbar (The standardized data matrix after          previous stages of analysis), and imaginary.u.eig ???. Info                                     http://cc.oulu.fi/~jarioksa/softhelp/vegan/html/cca.object.html   
+PCoA<-as.data.frame(PCoACA$u)
+#Change colnames. Now add dis and trans info to names 
+colnames(PCoA) <- c("MDS1BrayHel","MDS2BrayHel", "MDS3BrayHel","MDS4BrayHel")
+#Add row names to df
+PCoA$Sample <- row.names(PCoA)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, PCoA, by="Sample")
+
+
+#Creating column in Metadata2 for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Immediate"
+
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+
+#Create plot name
+pltName <- paste( 'PCoA', Subset, sep = '' )
+#create PCoA
+PCoAList[[ pltName ]]<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(MDS1BrayHel, MDS2BrayHel, color = Sample_type_new, group=Sample, size=0.001)) +
+  scale_color_manual(values=Experimentcol) + 
+  ggtitle(paste(Subset)) + 
+  labs(colour="Sample", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none") #+ 
+  #scale_y_reverse() #If you want the y scale reversed, to make plots easier to compare
+  #scale_x_reverse() #If you want the x scale reversed, to make plots easier to compare
+#ggsave(paste("CapscalePCoAYoungCOMPARE", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+#Screeplot 
+screeplot<-data.frame(PCoAcsObject$CA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', Subset, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + ggtitle(paste("Screeplot ", Subset)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCapscalePCoA", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+```
+
+
+### 6 Subsetting and plotting pig feces spiked
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("PFspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#5.1 collapse analysis to P1... by removing spiked in orgs. 
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remake proportions
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+#5.2 filtering
+##Filtering of the Counttable depending on rowSums. 
+#Tax2 <- Tax2[rowSums(Tax2)>0,]
+#Tax2 <- Tax2[rowSums(Tax2)>0.001*length(Tax2),]
+
+#Remake proportions don't need when filtering rowSums with 0
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+
+#6 PCoA with capscale can also generate stressplots
+distobj<-vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+#Multi dimensional scaling with capscale 
+PCoAcsObject<-capscale(distobj~1)
+
+
+#Make stressplot
+#Extract ordination distances and merge with observed dissimilarity
+stress<-stressplot(PCoAcsObject)
+df <- melt(as.matrix(stress))
+names(df)<-c("rowOrd", "colOrd", "OrdDist")
+df<-filter(df, OrdDist>0)
+df2 <- melt(as.matrix(distobj))
+names(df2)<-c("rowObs", "colObs", "ObsDism")
+df2<-filter(df2, ObsDism>0)
+df<-unite(df, mergecol, c(rowOrd, colOrd), remove=FALSE)
+df2<-unite(df2, mergecol, c(rowObs, colObs), remove=FALSE)
+ggstress<-merge(df, df2, by="mergecol")
+
+#Create plot name
+pltName <- paste( 'stress', Subset, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot(ggstress) + 
+  geom_point(aes(ObsDism, OrdDist)) +
+  ggtitle(paste("Stressplot", Subset, sep=" ")) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+##Add eig to plot axes. with cmdscale there are negative values not with capscale
+eig <- PCoAcsObject$CA$eig
+# Calculate the variation explained by PCoA1, 2, 3 and 4
+# and use it to generate axis labels
+eig_1_2 <- eig[1:4] / sum(eig) * 100
+eig_1 <- paste("PCoA1", round(eig_1_2[1], digits = 2), "% variance")
+eig_2 <- paste("PCoA2", round(eig_1_2[2], digits = 2), "% variance")
+eig_3 <- paste("PCoA3", round(eig_1_2[3], digits = 2), "% variance")
+eig_4 <- paste("PCoA4", round(eig_1_2[4], digits = 2), "% variance")
+
+##Pull out coordinates for plotting from the ca object
+#Structuring to add to Metadata2
+PCoACA<-PCoAcsObject$CA #The ca object contains the actual ordination results: u ((Weighted) orthonormal site        scores), v ((Weighted) orthonormal species scores) all na in mine, Xbar (The standardized data matrix after          previous stages of analysis), and imaginary.u.eig ???. Info                                     http://cc.oulu.fi/~jarioksa/softhelp/vegan/html/cca.object.html   
+PCoA<-as.data.frame(PCoACA$u)
+#Change colnames. Now add dis and trans info to names 
+colnames(PCoA) <- c("MDS1BrayHel","MDS2BrayHel", "MDS3BrayHel","MDS4BrayHel")
+#Add row names to df
+PCoA$Sample <- row.names(PCoA)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, PCoA, by="Sample")
+
+
+#Creating column in Metadata2 for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Immediate"
+
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+
+#Create plot name
+pltName <- paste( 'PCoA', Subset, sep = '' )
+#create PCoA
+PCoAList[[ pltName ]]<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Temperature, group = Sample, shape = Time, size=0.001)) +
+  #stat_ellipse(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Experiment), type="norm", size=1, level=0.70) +
+  scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+  ggtitle(paste(Subset)) + 
+  labs(colour="Temperature (°C)", shape="Time (h)", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none") #+ 
+  #scale_y_reverse() #If you want the y scale reversed, to make plots easier to compare
+  #scale_x_reverse() #If you want the x scale reversed, to make plots easier to compare
+#ggsave(paste("CapscalePCoAYoungCOMPARE", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+#Screeplot 
+screeplot<-data.frame(PCoAcsObject$CA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', Subset, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + ggtitle(paste("Screeplot ", Subset)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCapscalePCoA", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+```
+
+
+### 7 Subsetting and plotting sewage spiked
+```{r}
+#Subset data pig feces 1 and 2 (P1, P2), Sewage 1 and 2 (S1, S2), or spiked unspiked
+Subset<- c("SWspiked") #All, Allspiked, Allunspiked, PF, PFspiked, PFunspiked, SW, SWspiked, SWunspiked, P1, P1spiked, P1unspiked, P2, P2spiked, P2unspiked, S1, S1spiked, S1unspiked, S2, S2spiked, S2unspiked 
+
+#Removing negative and positive controls
+Metadata2<-filter(Metadata, Sample_type_simple=="Sample")
+
+#Subsetting Metadata2
+if (Subset=="Allspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Spiked")
+} else if (Subset=="Allunspiked") {
+  Metadata2<-filter(Metadata2, SpikedUnspiked == "Unspiked")
+} else if (Subset=="PF") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1" | Experiment == "Pig_feces_2")
+} else if (Subset=="PFspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked" | Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="PFunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1" | Sample_type == "Pig_feces_2")
+} else if (Subset=="SW") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1" | Experiment == "Sewage_2")
+} else if (Subset=="SWspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked" | Sample_type == "Sewage_2_spiked")
+} else if (Subset=="SWunspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1" | Sample_type == "Sewage_2")
+} else if (Subset=="P1") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_1")
+} else if (Subset=="P1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1_spiked")
+} else if (Subset=="P1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_1")
+} else if (Subset=="P2") {
+  Metadata2<-filter(Metadata2, Experiment == "Pig_feces_2")
+} else if (Subset=="P2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2_spiked")
+} else if (Subset=="P2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Pig_feces_2")
+} else if (Subset=="S1") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_1")
+} else if (Subset=="S1spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1_spiked")
+} else if (Subset=="S1unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_1")
+} else if (Subset=="S2") {
+  Metadata2<-filter(Metadata2, Experiment == "Sewage_2")
+} else if (Subset=="S2spiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2_spiked")
+} else if (Subset=="S2unspiked") {
+  Metadata2<-filter(Metadata2, Sample_type == "Sewage_2")
+} else if (Subset=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubExp=="HX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment")
+} else if (SubExp=="FTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="LTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="LPSX") {
+  Metadata22<-filter(Metadata2, Experiment_type == "Library_prep_seq_platform_experiment")
+  VectorLPSX <- unique(Metadata22$Matching_samples)
+  Metadata2<-filter(Metadata2, Matching_samples %in% VectorLPSX)
+  rm(VectorLPSX, Metadata22)
+} else if (SubExp=="HXFTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment")
+} else if (SubExp=="HXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="HXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXLTXLPSX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Long_term_storage_experiment" | Experiment_type == "Library_prep_seq_platform_experiment")
+} else if (SubExp=="HXFTXLTX") {
+  Metadata2<-filter(Metadata2, Experiment_type == "Handling_experiment" | Experiment_type == "Freeze_thaw_experiment" | Experiment_type == "Long_term_storage_experiment")
+} else if (SubExp=="All") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Further subsetting Metadata2
+if (SubFre=="Frozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Freezer")
+} else if (SubFre=="Unfrozen") {
+  Metadata2<-filter(Metadata2, FrozenUnfrozenSimple == "Unfrozen")
+} else if (SubFre=="Both") {
+  print("No subsetting, all included")
+} else {
+  print("Subset defined not valid")
+}
+
+#Applying subsetting to OTU tables 
+Tax2<-select(Tax, one_of(Metadata2$Sample))
+
+#5.1 collapse analysis to P1... by removing spiked in orgs. 
+##Remove spiked in orgs at genus level
+#SpikedGenus<-c("Escherichia", "Bacteroides", "Salmonella", "Fusobacterium", "Propionibacterium", "Staphylococcus", "Cryptosporidium", "Saccharomyces")
+#Tax2$Orgs<-rownames(Tax2)
+#Tax2<-Tax2[!Tax2$Orgs %in% SpikedGenus, ]
+#Tax2<-Tax2[, 1:length(Tax2)-1]
+
+#Remake proportions
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+#5.2 filtering
+##Filtering of the Counttable depending on rowSums. 
+#Tax2 <- Tax2[rowSums(Tax2)>0,]
+#Tax2 <- Tax2[rowSums(Tax2)>0.001*length(Tax2),]
+
+#Remake proportions don't need when filtering rowSums with 0
+#Tax2<-sweep(Tax2, 2, colSums(Tax2), FUN="/")
+
+
+#6 PCoA with capscale can also generate stressplots
+distobj<-vegdist(decostand(t(Tax2), method=Stand), method=Dist)
+#Multi dimensional scaling with capscale 
+PCoAcsObject<-capscale(distobj~1)
+
+
+#Make stressplot
+#Extract ordination distances and merge with observed dissimilarity
+stress<-stressplot(PCoAcsObject)
+df <- melt(as.matrix(stress))
+names(df)<-c("rowOrd", "colOrd", "OrdDist")
+df<-filter(df, OrdDist>0)
+df2 <- melt(as.matrix(distobj))
+names(df2)<-c("rowObs", "colObs", "ObsDism")
+df2<-filter(df2, ObsDism>0)
+df<-unite(df, mergecol, c(rowOrd, colOrd), remove=FALSE)
+df2<-unite(df2, mergecol, c(rowObs, colObs), remove=FALSE)
+ggstress<-merge(df, df2, by="mergecol")
+
+#Create plot name
+pltName <- paste( 'stress', Subset, sep = '' )
+#create stressplot
+StressList[[ pltName ]]<-ggplot(ggstress) + 
+  geom_point(aes(ObsDism, OrdDist)) +
+  ggtitle(paste("Stressplot", Subset, sep=" ")) + 
+  labs(x = "Observed dissimilarity", y = "Ordination distance") + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+
+##Add eig to plot axes. with cmdscale there are negative values not with capscale
+eig <- PCoAcsObject$CA$eig
+# Calculate the variation explained by PCoA1, 2, 3 and 4
+# and use it to generate axis labels
+eig_1_2 <- eig[1:4] / sum(eig) * 100
+eig_1 <- paste("PCoA1", round(eig_1_2[1], digits = 2), "% variance")
+eig_2 <- paste("PCoA2", round(eig_1_2[2], digits = 2), "% variance")
+eig_3 <- paste("PCoA3", round(eig_1_2[3], digits = 2), "% variance")
+eig_4 <- paste("PCoA4", round(eig_1_2[4], digits = 2), "% variance")
+
+##Pull out coordinates for plotting from the ca object
+#Structuring to add to Metadata2
+PCoACA<-PCoAcsObject$CA #The ca object contains the actual ordination results: u ((Weighted) orthonormal site        scores), v ((Weighted) orthonormal species scores) all na in mine, Xbar (The standardized data matrix after          previous stages of analysis), and imaginary.u.eig ???. Info                                     http://cc.oulu.fi/~jarioksa/softhelp/vegan/html/cca.object.html   
+PCoA<-as.data.frame(PCoACA$u)
+#Change colnames. Now add dis and trans info to names 
+colnames(PCoA) <- c("MDS1BrayHel","MDS2BrayHel", "MDS3BrayHel","MDS4BrayHel")
+#Add row names to df
+PCoA$Sample <- row.names(PCoA)
+#Merge according to Sample
+Metadata2<-merge(Metadata2, PCoA, by="Sample")
+
+
+#Creating column in Metadata2 for plotting with lines between replicates
+Metadata2$Sample_name_norep<-gsub("*_a|*_b|*_c", "", Metadata2$Sample_name)
+#Change temperature and time to characters for plotting
+Metadata2$Temperature<-as.character(Metadata2$Temperature)
+Metadata2$Time<-as.character(Metadata2$Time)
+#Change NAs in temperature to Direct
+Metadata2$Temperature[is.na(Metadata2$Temperature)]<-"Immediate"
+
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+#Change order for coloring
+Metadata2$Temperature<-ordered(Metadata2$Temperature, levels=c("Immediate", "-80", "-20", "5", "22"))
+
+#Create plot name
+pltName <- paste( 'PCoA', Subset, sep = '' )
+#create PCoA
+PCoAList[[ pltName ]]<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Temperature, group = Sample, shape = Time, size=0.001)) +
+  #stat_ellipse(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Experiment), type="t", size=1) +
+  scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+  ggtitle(paste(Subset)) + 
+  labs(colour="Temperature (°C)", shape="Time (h)", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="none") #+ 
+  #scale_y_reverse() #If you want the y scale reversed, to make plots easier to compare
+  #scale_x_reverse() #If you want the x scale reversed, to make plots easier to compare
+#ggsave(paste("CapscalePCoAYoungCOMPARE", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+
+#Screeplot 
+screeplot<-data.frame(PCoAcsObject$CA$eig)
+colnames(screeplot)<-c("eig")
+screeplot$eig <- screeplot$eig[1:length(screeplot$eig)] / sum(screeplot$eig) * 100
+screeplot<-add_rownames(screeplot, "MDS")
+screeplot$MDS <- factor(screeplot$MDS, levels=c(sprintf("MDS%d", 1:length(screeplot$eig))))
+
+#Create plot name
+pltName <- paste( 'scree', Subset, sep = '' )
+#create screeplot
+ScreeList[[ pltName ]]<-ggplot(screeplot, aes(x=MDS, y=eig)) + 
+  geom_bar(stat="identity") + 
+  labs(x ="MDS", y ="eig (%)") + ggtitle(paste("Screeplot ", Subset)) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), axis.text.x=element_blank(), axis.ticks.x=element_blank()) 
+#ggsave(filename=paste("ScreeplotCapscalePCoA", "Genus", Subset, OrgFlt, ".pdf", sep=""), height=6, width=12)
+
+
+```
+
+
+### 8 PCoAs with validation plots
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,1,4,4,7,7),
+             c(1,1,4,4,7,7),
+             c(2,3,5,6,8,9))
+pdf(paste("PCoA", "GenusVal", ".pdf", sep=""), width=24, height=12)
+grid.arrange(PCoAList$PCoAAllunspiked, ScreeList$screeAllunspiked, StressList$stressAllunspiked, PCoAList$PCoAPFunspiked, ScreeList$screePFunspiked, StressList$stressPFunspiked, PCoAList$PCoASWunspiked, ScreeList$screeSWunspiked, StressList$stressSWunspiked, layout_matrix = lay)
+dev.off()
+```
+
+### 9 PCoAs without validation plots
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,2,3))
+pdf(paste("PCoAGenus", ".pdf", sep=""), width=18, height=6)
+grid.arrange(PCoAList$PCoAAllunspiked, PCoAList$PCoAPFunspiked, PCoAList$PCoASWunspiked, layout_matrix = lay)
+dev.off()
+
+#Have the plots stored in lists
+lay <- rbind(c(1,1,NA,NA,NA,NA),
+             c(1,1,NA,NA,NA,NA),
+             c(2,2,2,3,3,3),
+             c(2,2,2,3,3,3),
+             c(2,2,2,3,3,3))
+pdf(paste("PCoAGenusFigure2", ".pdf", sep=""), width=12, height=8)
+grid.arrange(PCoAList$PCoAAllunspiked, PCoAList$PCoAPFunspiked, PCoAList$PCoASWunspiked, layout_matrix = lay)
+dev.off()
+```
+
+### 10 PCoAs including both spiked and unspiked with validation plots
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,1,4,4,7,7),
+             c(1,1,4,4,7,7),
+             c(2,3,5,6,8,9),
+             c(10,10,13,13,16,16),
+             c(10,10,13,13,16,16),
+             c(11,12,14,15,17,18))
+pdf(paste("PCoAAll", "GenusVal", ".pdf", sep=""), width=12, height=12)
+grid.arrange(PCoAList$PCoAAllspiked, ScreeList$screeAllspiked, StressList$stressAllspiked, PCoAList$PCoAPFspiked, ScreeList$screePFspiked, StressList$stressPFspiked, PCoAList$PCoASWspiked, ScreeList$screeSWspiked, StressList$stressSWspiked, PCoAList$PCoAAllunspiked, ScreeList$screeAllunspiked, StressList$stressAllunspiked, PCoAList$PCoAPFunspiked, ScreeList$screePFunspiked, StressList$stressPFunspiked, PCoAList$PCoASWunspiked, ScreeList$screeSWunspiked, StressList$stressSWunspiked, layout_matrix = lay)
+dev.off()
+```
+
+### 11 PCoAs including both spiked and unspiked without validation plots
+```{r}
+#Have the plots stored in lists
+lay <- rbind(c(1,2,3),
+             c(4,5,6))
+pdf(paste("PCoAAllGenus", ".pdf", sep=""), width=9, height=6)
+grid.arrange(PCoAList$PCoAAllspiked, PCoAList$PCoAPFspiked, PCoAList$PCoASWspiked, PCoAList$PCoAAllunspiked, PCoAList$PCoAPFunspiked, PCoAList$PCoASWunspiked, layout_matrix = lay)
+dev.off()
+```
+
+
+### 12 Legend plot
+```{r}
+legend<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Temperature, group = Sample, shape = Time), size=3) +
+  #stat_ellipse(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Experiment), type="t", size=1) +
+  scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+  ggtitle(paste("PCoA ", Subset)) + 
+  labs(colour="Temperature (°C)", shape="Time (h)", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12))
+
+legendplot<-get_legend(legend)
+pdf(paste("LegendPCoA2", ".pdf", sep=""), width=2.4, height=4)
+grid.arrange(legendplot)
+dev.off()
+
+legend2<-ggplot(Metadata2) + 
+  geom_line(aes(x=MDS1BrayHel, y=MDS2BrayHel, group=Sample_name_norep)) +  
+  geom_point(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Temperature, group = Sample, shape = Time), size=3) +
+  #stat_ellipse(aes(x=MDS1BrayHel, y=MDS2BrayHel, color = Experiment), type="t", size=1) +
+  scale_color_manual(values=c(Storagecol, Experimentcol)) + 
+  ggtitle(paste("PCoA ", Subset)) + 
+  labs(colour="Temperature (°C)", shape="Time (h)", x = eig_1, y = eig_2) + 
+  theme_bw() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title=element_text(size=12), legend.position="bottom")
+
+legendplot<-get_legend(legend2)
+pdf(paste("LegendPCoA3", ".pdf", sep=""), width=10, height=1)
+grid.arrange(legendplot)
+dev.off()
+```
+
+
+## Additional
+### Session information
+```{r session_info}
+sessionInfo()
+```
+
+### This document was processed on: 
+```{r}
+Sys.Date()
+```
+
